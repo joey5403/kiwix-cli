@@ -2,6 +2,5 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-export PLATFORM=linux
-export TARGET=${TARGET:-x86_64-unknown-linux-gnu}
+export PLATFORM=macos
 exec "$SCRIPT_DIR/build-release.sh"

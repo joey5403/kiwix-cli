@@ -36,7 +36,7 @@ paru -S kiwix-cli-bin
 Download and install the current Linux `x86_64` release:
 
 ```bash
-VERSION=0.1.2
+VERSION=0.1.3
 ARCHIVE="kiwix-cli-${VERSION}-linux-x86_64.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
 
@@ -49,6 +49,23 @@ install -Dm644 "kiwix-cli-${VERSION}-linux-x86_64/man/man1/kiwix-cli.1" "$HOME/.
 ```
 
 Ensure `$HOME/.local/bin` is on `PATH` before starting `kiwix-cli`.
+
+On macOS, select the archive for the current architecture (`arm64` on Apple Silicon or `x86_64` on Intel):
+
+```bash
+VERSION=0.1.3
+ARCH="$(uname -m)"
+ARCHIVE="kiwix-cli-${VERSION}-macos-${ARCH}.tar.gz"
+BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
+
+curl --fail --location --remote-name "${BASE_URL}/${ARCHIVE}"
+curl --fail --location --remote-name "${BASE_URL}/${ARCHIVE}.sha256"
+shasum -a 256 -c "${ARCHIVE}.sha256"
+tar -xzf "$ARCHIVE"
+mkdir -p "$HOME/.local/bin" "$HOME/.local/share/man/man1"
+install -m755 "kiwix-cli-${VERSION}-macos-${ARCH}/kiwix-cli" "$HOME/.local/bin/kiwix-cli"
+install -m644 "kiwix-cli-${VERSION}-macos-${ARCH}/man/man1/kiwix-cli.1" "$HOME/.local/share/man/man1/kiwix-cli.1"
+```
 
 Build and install from this checkout:
 
@@ -63,13 +80,15 @@ cargo build --release
 ./target/release/kiwix-cli --help
 ```
 
-To build a Linux release archive containing the binary, license, bilingual README files, and a SHA-256 checksum:
+To build a release archive containing the binary, license, bilingual README files, man page, and a SHA-256 checksum:
 
 ```bash
 ./scripts/build-linux.sh
+# On macOS:
+./scripts/build-macos.sh
 ```
 
-Install the manual page for local use:
+Install the manual page from this checkout for local use:
 
 ```bash
 install -Dm644 man/kiwix-cli.1 ~/.local/share/man/man1/kiwix-cli.1
@@ -247,9 +266,9 @@ git diff --check
 
 The automated test suite uses local mock HTTP servers and does not require a live Kiwix service.
 
-The packaging script targets `x86_64-unknown-linux-gnu` by default. Set `TARGET` to another installed Linux Rust target when needed.
+The Linux packaging script targets `x86_64-unknown-linux-gnu` by default. The macOS script builds the current architecture by default; set `TARGET=x86_64-apple-darwin` or `TARGET=aarch64-apple-darwin` when needed.
 
-The Linux release archive includes the manual page at `man/man1/kiwix-cli.1`.
+Linux and macOS release archives include the manual page at `man/man1/kiwix-cli.1`. macOS binaries are ad-hoc signed but not Apple-notarized; when Gatekeeper blocks a browser-downloaded archive, remove quarantine with `xattr -dr com.apple.quarantine kiwix-cli-*/` after verifying its checksum.
 
 For manual testing against a real service:
 

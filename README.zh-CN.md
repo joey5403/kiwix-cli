@@ -36,7 +36,7 @@ paru -S kiwix-cli-bin
 下载并安装当前 Linux `x86_64` Release：
 
 ```bash
-VERSION=0.1.2
+VERSION=0.1.3
 ARCHIVE="kiwix-cli-${VERSION}-linux-x86_64.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
 
@@ -49,6 +49,23 @@ install -Dm644 "kiwix-cli-${VERSION}-linux-x86_64/man/man1/kiwix-cli.1" "$HOME/.
 ```
 
 启动 `kiwix-cli` 前，请确保 `$HOME/.local/bin` 已加入 `PATH`。
+
+在 macOS 上，根据当前架构选择压缩包（Apple Silicon 为 `arm64`，Intel 为 `x86_64`）：
+
+```bash
+VERSION=0.1.3
+ARCH="$(uname -m)"
+ARCHIVE="kiwix-cli-${VERSION}-macos-${ARCH}.tar.gz"
+BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
+
+curl --fail --location --remote-name "${BASE_URL}/${ARCHIVE}"
+curl --fail --location --remote-name "${BASE_URL}/${ARCHIVE}.sha256"
+shasum -a 256 -c "${ARCHIVE}.sha256"
+tar -xzf "$ARCHIVE"
+mkdir -p "$HOME/.local/bin" "$HOME/.local/share/man/man1"
+install -m755 "kiwix-cli-${VERSION}-macos-${ARCH}/kiwix-cli" "$HOME/.local/bin/kiwix-cli"
+install -m644 "kiwix-cli-${VERSION}-macos-${ARCH}/man/man1/kiwix-cli.1" "$HOME/.local/share/man/man1/kiwix-cli.1"
+```
 
 从当前源码目录安装：
 
@@ -63,13 +80,15 @@ cargo build --release
 ./target/release/kiwix-cli --help
 ```
 
-生成包含 Linux 二进制、许可证、双语 README 和 SHA-256 校验文件的发布压缩包：
+生成包含二进制、许可证、双语 README、man 手册和 SHA-256 校验文件的发布压缩包：
 
 ```bash
 ./scripts/build-linux.sh
+# 在 macOS 上：
+./scripts/build-macos.sh
 ```
 
-安装 man 手册页：
+从当前源码目录安装 man 手册页：
 
 ```bash
 install -Dm644 man/kiwix-cli.1 ~/.local/share/man/man1/kiwix-cli.1
@@ -247,9 +266,9 @@ git diff --check
 
 自动化测试使用本地 mock HTTP 服务，不需要外部 Kiwix 实例。
 
-打包脚本默认目标为 `x86_64-unknown-linux-gnu`。需要其他 Linux Rust target 时，可以通过 `TARGET` 环境变量切换到已安装的目标。
+Linux 打包脚本默认目标为 `x86_64-unknown-linux-gnu`。macOS 脚本默认构建当前架构；需要指定架构时可设置 `TARGET=x86_64-apple-darwin` 或 `TARGET=aarch64-apple-darwin`。
 
-Linux 发布压缩包会把手册页放在 `man/man1/kiwix-cli.1`。
+Linux 和 macOS 发布压缩包都会把手册页放在 `man/man1/kiwix-cli.1`。macOS 二进制使用 ad-hoc 签名，但没有经过 Apple notarization；如果浏览器下载的包被 Gatekeeper 阻止，请先校验 SHA-256，再运行 `xattr -dr com.apple.quarantine kiwix-cli-*/`。
 
 对真实服务进行手工验证：
 
