@@ -4,7 +4,7 @@
 
 [![Latest release](https://img.shields.io/github/v/release/joey5403/kiwix-cli?label=release)](https://github.com/joey5403/kiwix-cli/releases/latest) [![AUR package](https://img.shields.io/aur/version/kiwix-cli-bin?label=AUR)](https://aur.archlinux.org/packages/kiwix-cli-bin)
 
-[![Watch the usage recording](https://asciinema.org/a/fVV516TzOQImj5JJ.svg)](https://asciinema.org/a/fVV516TzOQImj5JJ)
+[![Watch the usage recording](https://asciinema.org/a/sYhv1UpE7iS1akCg.svg)](https://asciinema.org/a/sYhv1UpE7iS1akCg)
 
 Local playback is also available with `asciinema play docs/kiwix-cli.cast`.
 
