@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-使用 Rust、Ratatui 和 Crossterm 开发的键盘优先 Kiwix 终端阅读器。它连接一个自建 Kiwix 服务，支持文库主页、全文搜索、随机文章、富样式文章阅读、内部链接跳转和外部图片查看，适合本地终端和 SSH 环境。
+使用 Rust、Ratatui 和 Crossterm 开发的键盘优先 Kiwix 终端阅读器。默认连接 Kiwix 公共 Browse 服务，也可以配置为自建 Kiwix 服务；支持文库主页、全文搜索、随机文章、富样式文章阅读、内部链接跳转和外部图片查看，适合本地终端和 SSH 环境。
 
 ## 使用说明
 
@@ -30,7 +30,13 @@ cargo build --release
 
 ### 配置
 
-通过 `--server` 或 `KIWIX_URL` 提供服务地址：
+默认服务地址为：
+
+```text
+https://browse.library.kiwix.org/
+```
+
+使用自建服务时，通过 `--server` 或 `KIWIX_URL` 覆盖默认地址：
 
 ```bash
 export KIWIX_URL="https://wiki.example.com"
@@ -121,7 +127,7 @@ kiwix-cli read /content/rust_docs/A/Ownership --width 60
 全局参数可以放在子命令之前或之后：
 
 ```text
---server <URL>       Kiwix 服务地址，或 KIWIX_URL
+--server <URL>       Kiwix 服务地址，或 KIWIX_URL；默认使用公共 Browse 服务
 --username <NAME>    Basic Auth 用户名，或 KIWIX_USERNAME
 --timeout <SECONDS>  请求超时，默认 30 秒，范围 1-300
 ```

@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A keyboard-first Kiwix reader built with Rust, Ratatui, and Crossterm. It connects to one self-hosted Kiwix server and supports library home pages, full-text search, random articles, styled article reading, internal links, and external image viewing from a terminal or SSH session.
+A keyboard-first Kiwix reader built with Rust, Ratatui, and Crossterm. It connects to the public Kiwix Browse service by default, or one self-hosted Kiwix server when configured, and supports library home pages, full-text search, random articles, styled article reading, internal links, and external image viewing from a terminal or SSH session.
 
 ## Usage
 
@@ -30,7 +30,13 @@ cargo build --release
 
 ### Configure
 
-Provide the server with `--server` or `KIWIX_URL`:
+The default server is:
+
+```text
+https://browse.library.kiwix.org/
+```
+
+Override it with `--server` or `KIWIX_URL` when using a self-hosted server:
 
 ```bash
 export KIWIX_URL="https://wiki.example.com"
@@ -121,7 +127,7 @@ kiwix-cli read /content/rust_docs/A/Ownership --width 60
 Global options may appear before or after the subcommand:
 
 ```text
---server <URL>       Kiwix server URL, or KIWIX_URL
+--server <URL>       Kiwix server URL, or KIWIX_URL; default public Browse service
 --username <NAME>    Basic Auth username, or KIWIX_USERNAME
 --timeout <SECONDS>  Request timeout, default 30, range 1-300
 ```

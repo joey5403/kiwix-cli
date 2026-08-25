@@ -7,10 +7,12 @@ use crossterm::terminal;
 use kiwix_cli::client::KiwixClient;
 use kiwix_cli::tui::run_tui;
 
+const DEFAULT_SERVER: &str = "https://browse.library.kiwix.org/";
+
 #[derive(Debug, Parser)]
 #[command(version, about = "Browse a self-hosted Kiwix server from the terminal")]
 struct Cli {
-    /// Kiwix server URL (or `KIWIX_URL`)
+    /// Kiwix server URL (or `KIWIX_URL`); defaults to the public Browse service
     #[arg(long, env = "KIWIX_URL", global = true)]
     server: Option<String>,
 
@@ -84,9 +86,7 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let server = cli
-        .server
-        .context("set --server or the KIWIX_URL environment variable")?;
+    let server = configured_server(cli.server);
     let password = env::var("KIWIX_PASSWORD").ok();
     let client = KiwixClient::new(
         &server,
@@ -164,4 +164,26 @@ fn print_article(html: &str, width: Option<usize>, error_context: &'static str) 
 
 fn one_line(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn configured_server(server: Option<String>) -> String {
+    server.unwrap_or_else(|| DEFAULT_SERVER.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DEFAULT_SERVER, configured_server};
+
+    #[test]
+    fn uses_public_browse_server_when_no_override_is_set() {
+        assert_eq!(configured_server(None), DEFAULT_SERVER);
+    }
+
+    #[test]
+    fn preserves_an_explicit_server_override() {
+        assert_eq!(
+            configured_server(Some("https://local.test/".to_owned())),
+            "https://local.test/"
+        );
+    }
 }
