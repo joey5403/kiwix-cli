@@ -1,0 +1,27 @@
+[package]
+name = "kiwix-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Browse a self-hosted Kiwix server from the command line"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.6", features = ["derive", "env"] }
+crossterm = "0.29.0"
+html2text = "0.17.1"
+open = "5.4.2"
+percent-encoding = "2.3.2"
+quick-xml = "0.42.0"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls", "gzip", "brotli", "deflate"] }
+tempfile = "3.27.0"
+unicode-width = "0.2.2"
+url = "2.5.8"
+uuid = { version = "1.25.0", features = ["std"] }
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+httpmock = "0.8.3"
+predicates = "3.1.4"
