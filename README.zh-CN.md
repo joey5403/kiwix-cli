@@ -36,7 +36,7 @@ paru -S kiwix-cli-bin
 下载并安装当前 Linux `x86_64` Release：
 
 ```bash
-VERSION=0.1.1
+VERSION=0.1.2
 ARCHIVE="kiwix-cli-${VERSION}-linux-x86_64.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
 
