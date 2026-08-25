@@ -49,7 +49,7 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 ARCH=$(case "$TARGET" in
-    x86_64-unknown-linux-gnu | x86_64-apple-darwin) printf '%s' x86_64 ;;
+    x86_64-unknown-linux-gnu|x86_64-apple-darwin) printf '%s' x86_64 ;;
     aarch64-unknown-linux-gnu) printf '%s' aarch64 ;;
     aarch64-apple-darwin) printf '%s' arm64 ;;
     *) printf '%s' "$TARGET" | tr '/' '-' ;;
