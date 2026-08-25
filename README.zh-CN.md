@@ -34,6 +34,13 @@ cargo build --release
 ./scripts/build-linux.sh
 ```
 
+安装 man 手册页：
+
+```bash
+install -Dm644 man/kiwix-cli.1 ~/.local/share/man/man1/kiwix-cli.1
+man kiwix-cli
+```
+
 ### 配置
 
 默认服务地址为：
@@ -203,6 +210,8 @@ git diff --check
 自动化测试使用本地 mock HTTP 服务，不需要外部 Kiwix 实例。
 
 打包脚本默认目标为 `x86_64-unknown-linux-gnu`。需要其他 Linux Rust target 时，可以通过 `TARGET` 环境变量切换到已安装的目标。
+
+Linux 发布压缩包会把手册页放在 `man/man1/kiwix-cli.1`。
 
 对真实服务进行手工验证：
 

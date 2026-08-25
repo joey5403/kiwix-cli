@@ -34,6 +34,13 @@ To build a Linux release archive containing the binary, license, bilingual READM
 ./scripts/build-linux.sh
 ```
 
+Install the manual page for local use:
+
+```bash
+install -Dm644 man/kiwix-cli.1 ~/.local/share/man/man1/kiwix-cli.1
+man kiwix-cli
+```
+
 ### Configure
 
 The default server is:
@@ -203,6 +210,8 @@ git diff --check
 The automated test suite uses local mock HTTP servers and does not require a live Kiwix service.
 
 The packaging script targets `x86_64-unknown-linux-gnu` by default. Set `TARGET` to another installed Linux Rust target when needed.
+
+The Linux release archive includes the manual page at `man/man1/kiwix-cli.1`.
 
 For manual testing against a real service:
 

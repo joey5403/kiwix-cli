@@ -54,6 +54,8 @@ fi
 
 cp "$BINARY" "$STAGE_DIR/kiwix-cli"
 cp LICENSE README.md README.zh-CN.md "$STAGE_DIR/"
+mkdir -p "$STAGE_DIR/man/man1"
+cp man/kiwix-cli.1 "$STAGE_DIR/man/man1/"
 if command -v strip >/dev/null 2>&1; then
     strip "$STAGE_DIR/kiwix-cli"
 fi

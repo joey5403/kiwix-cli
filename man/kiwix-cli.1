@@ -1,0 +1,132 @@
+.TH KIWIX-CLI 1 "2026-08-25" "kiwix-cli 0.1.1" "User Commands"
+.SH NAME
+kiwix-cli \- browse Kiwix libraries and articles from a terminal
+.SH SYNOPSIS
+.B kiwix-cli
+[IOPTIONSR]
+[ICOMMANDR]
+.PP
+.B kiwix-cli books
+.PP
+.B kiwix-cli search
+\fB--book\fR IUUIDR [\fB--start\fR IN\fR] [\fB--limit\fR IN\fR] IQUERYR
+.PP
+.B kiwix-cli read
+[B--widthR ICOLUMNSR] ILOCATORR
+.PP
+.B kiwix-cli home
+\fB--content\fR ICONTENTR [\fB--width\fR ICOLUMNSR]
+.PP
+.B kiwix-cli random
+\fB--content\fR ICONTENTR [\fB--width\fR ICOLUMNSR]
+.SH DESCRIPTION
+.B kiwix-cli
+is a keyboard-first terminal reader for a Kiwix server. With no subcommand it starts an interactive Ratatui interface. The default server is the public Kiwix Browse service:
+.PP
+.EX
+https://browse.library.kiwix.org/
+.EE
+.PP
+Use a self-hosted server with \fB--server\fR or \fBKIWIX_URL\fR.
+.SH OPTIONS
+.TP
+.BI --server " URL"
+Kiwix server URL. Defaults to the public Browse service unless \fBKIWIX_URL\fR is set.
+.TP
+.BI --username " NAME"
+HTTP Basic Auth username. May also be set with \fBKIWIX_USERNAME\fR.
+.TP
+.BI --timeout " SECONDS"
+Request timeout from 1 to 300 seconds. The default is 30.
+.TP
+.B -h, --help
+Print help.
+.TP
+.B -V, --version
+Print the version.
+.SH ENVIRONMENT
+.TP
+.B KIWIX_URL
+Default server URL override.
+.TP
+.B KIWIX_USERNAME
+HTTP Basic Auth username.
+.TP
+.B KIWIX_PASSWORD
+HTTP Basic Auth password. It is intentionally not accepted as a command-line option.
+.SH COMMANDS
+.TP
+.B books
+List catalog UUIDs, content names, and titles for all available libraries.
+.TP
+.BI search " QUERY"
+Search one library selected by its catalog UUID. Use \fB--start\fR for a zero-based offset and \fB--limit\fR for 1 to 50 results.
+.TP
+.BI read " LOCATOR"
+Read a validated \fB/content/...\fR locator returned by search. \fB--width\fR overrides terminal-width rendering.
+.TP
+.BI home " --content CONTENT"
+Open the home page of a content library. The Kiwix redirect is validated before the article is fetched.
+.TP
+.BI random " --content CONTENT"
+Open a random article from a content library. The Kiwix redirect is validated before the article is fetched.
+.SH INTERACTIVE MODE
+Start with no subcommand:
+.PP
+.EX
+kiwix-cli
+.EE
+.PP
+In the library list, \fBEnter\fR or \fBl\fR opens the selected library home page and \fB/\fR opens search. Article controls are:
+.IP "j / k, arrows" 4
+Move or scroll.
+.IP "Space / b" 4
+Page down / page up.
+.IP "Tab / Shift-Tab" 4
+Select the next or previous article link or image.
+.IP "Enter / mouse click" 4
+Open the selected internal link, external link, or image.
+.IP "n / p" 4
+Next or previous search result page.
+.IP "g / G" 4
+Beginning or end.
+.IP "r" 4
+Reload the current view.
+.IP "R" 4
+Open a random article from the current library.
+.IP "h / q / Escape" 4
+Go back. Press \fBq\fR in the library list to quit.
+.IP "Ctrl-C" 4
+Exit and restore the terminal.
+.PP
+Article HTML is rendered with styles for headings, emphasis, code, tables, links, and images. Internal Wiki links keep article history. Images are downloaded with the configured credentials before an external opener is launched. Small formula SVGs are rewritten as a larger vector SVG while retaining their paths and viewBox.
+.SH EXAMPLES
+.EX
+export KIWIX_URL=https://wiki.example.com
+export KIWIX_USERNAME=wiki
+export KIWIX_PASSWORD='secret'
+
+kiwix-cli books
+kiwix-cli home --content wikivoyage_en_all_maxi_2026-06
+kiwix-cli search --book 12345678-1234-5678-1234-567812345678 'Rust ownership'
+kiwix-cli read /content/rust_docs/A/Ownership --width 80
+kiwix-cli random --content wikivoyage_en_all_maxi_2026-06
+.EE
+.SH SECURITY
+Credentials are not embedded in URLs or passed to external openers. Automatic HTTP redirects are disabled. Home and random redirects must remain on the configured origin and inside the requested library. Unsafe schemes, traversal paths, malformed escapes, DTDs, and oversized responses are rejected.
+.SH FILES
+.TP
+.I ~/.local/share/man/man1/kiwix-cli.1
+Recommended per-user installation path for this manual page.
+.TP
+.I /usr/share/man/man1/kiwix-cli.1
+Typical system-wide installation path.
+.SH INSTALLING THE MANUAL
+.EX
+install -Dm644 man/kiwix-cli.1 ~/.local/share/man/man1/kiwix-cli.1
+man kiwix-cli
+.EE
+.SH AUTHOR
+Joey
+.SH LICENSE
+MIT License. See the LICENSE file distributed with the project.
