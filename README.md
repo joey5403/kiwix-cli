@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+[![Latest release](https://img.shields.io/github/v/release/joey5403/kiwix-cli?label=release)](https://github.com/joey5403/kiwix-cli/releases/latest) [![AUR package](https://img.shields.io/badge/AUR-not%20published-lightgrey)](https://aur.archlinux.org/packages?K=kiwix-cli)
+
 A keyboard-first Kiwix reader built with Rust, Ratatui, and Crossterm. It connects to the public Kiwix Browse service by default, or one self-hosted Kiwix server when configured, and supports library home pages, full-text search, random articles, styled article reading, internal links, and external image viewing from a terminal or SSH session.
 
 ## Usage
@@ -14,6 +16,37 @@ A keyboard-first Kiwix reader built with Rust, Ratatui, and Crossterm. It connec
 - A system file opener for images, such as `xdg-open` on Linux
 
 ### Install
+
+#### AUR
+
+There is currently no official `kiwix-cli` package in the AUR. Once it is published, install it with an AUR helper:
+
+```bash
+yay -S kiwix-cli
+# or
+paru -S kiwix-cli
+```
+
+Until then, use the GitHub Release installation below or build from source.
+
+#### GitHub Release
+
+Download and install the current Linux `x86_64` release:
+
+```bash
+VERSION=0.1.1
+ARCHIVE="kiwix-cli-${VERSION}-linux-x86_64.tar.gz"
+BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
+
+curl --fail --location --remote-name "${BASE_URL}/${ARCHIVE}"
+curl --fail --location --remote-name "${BASE_URL}/${ARCHIVE}.sha256"
+sha256sum -c "${ARCHIVE}.sha256"
+tar -xzf "$ARCHIVE"
+install -Dm755 "kiwix-cli-${VERSION}-linux-x86_64/kiwix-cli" "$HOME/.local/bin/kiwix-cli"
+install -Dm644 "kiwix-cli-${VERSION}-linux-x86_64/man/man1/kiwix-cli.1" "$HOME/.local/share/man/man1/kiwix-cli.1"
+```
+
+Ensure `$HOME/.local/bin` is on `PATH` before starting `kiwix-cli`.
 
 Build and install from this checkout:
 

@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+[![最新 Release](https://img.shields.io/github/v/release/joey5403/kiwix-cli?label=release)](https://github.com/joey5403/kiwix-cli/releases/latest) [![AUR 状态](https://img.shields.io/badge/AUR-尚未发布-lightgrey)](https://aur.archlinux.org/packages?K=kiwix-cli)
+
 使用 Rust、Ratatui 和 Crossterm 开发的键盘优先 Kiwix 终端阅读器。默认连接 Kiwix 公共 Browse 服务，也可以配置为自建 Kiwix 服务；支持文库主页、全文搜索、随机文章、富样式文章阅读、内部链接跳转和外部图片查看，适合本地终端和 SSH 环境。
 
 ## 使用说明
@@ -14,6 +16,37 @@
 - 查看图片需要系统文件打开器，例如 Linux 下的 `xdg-open`
 
 ### 安装
+
+#### AUR
+
+当前 AUR 尚未发布官方 `kiwix-cli`、`kiwix-cli-bin` 或 `kiwix-cli-git` 包。包发布后，可以使用 AUR 助手安装：
+
+```bash
+yay -S kiwix-cli
+# 或
+paru -S kiwix-cli
+```
+
+在 AUR 包发布前，请使用下面的 GitHub Release 安装方式，或从源码构建。
+
+#### GitHub Release
+
+下载并安装当前 Linux `x86_64` Release：
+
+```bash
+VERSION=0.1.1
+ARCHIVE="kiwix-cli-${VERSION}-linux-x86_64.tar.gz"
+BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
+
+curl --fail --location --remote-name "${BASE_URL}/${ARCHIVE}"
+curl --fail --location --remote-name "${BASE_URL}/${ARCHIVE}.sha256"
+sha256sum -c "${ARCHIVE}.sha256"
+tar -xzf "$ARCHIVE"
+install -Dm755 "kiwix-cli-${VERSION}-linux-x86_64/kiwix-cli" "$HOME/.local/bin/kiwix-cli"
+install -Dm644 "kiwix-cli-${VERSION}-linux-x86_64/man/man1/kiwix-cli.1" "$HOME/.local/share/man/man1/kiwix-cli.1"
+```
+
+启动 `kiwix-cli` 前，请确保 `$HOME/.local/bin` 已加入 `PATH`。
 
 从当前源码目录安装：
 
