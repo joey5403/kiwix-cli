@@ -48,12 +48,13 @@ if [[ -z "$VERSION" ]]; then
     exit 2
 fi
 
-ARCH=$(case "$TARGET" in
-    x86_64-unknown-linux-gnu|x86_64-apple-darwin) printf '%s' x86_64 ;;
-    aarch64-unknown-linux-gnu) printf '%s' aarch64 ;;
-    aarch64-apple-darwin) printf '%s' arm64 ;;
-    *) printf '%s' "$TARGET" | tr '/' '-' ;;
-esac)
+case "$TARGET" in
+    x86_64-unknown-linux-gnu) ARCH=x86_64 ;;
+    x86_64-apple-darwin) ARCH=x86_64 ;;
+    aarch64-unknown-linux-gnu) ARCH=aarch64 ;;
+    aarch64-apple-darwin) ARCH=arm64 ;;
+    *) ARCH=$(printf '%s' "$TARGET" | tr '/' '-') ;;
+esac
 PACKAGE="kiwix-cli-${VERSION}-${PLATFORM}-${ARCH}"
 DIST_DIR="$ROOT_DIR/dist"
 STAGE_DIR="$DIST_DIR/$PACKAGE"
