@@ -29,6 +29,13 @@ struct ActionHit {
     end: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisibleAction {
+    pub action: usize,
+    pub line: usize,
+    pub column: usize,
+}
+
 #[derive(Debug, Clone)]
 struct DocumentSpan {
     text: String,
@@ -179,6 +186,25 @@ impl ArticleDocument {
     }
 
     #[must_use]
+    pub fn visible_actions(&self, first_line: usize, line_count: usize) -> Vec<VisibleAction> {
+        let end_line = first_line.saturating_add(line_count);
+        self.actions
+            .iter()
+            .enumerate()
+            .filter_map(|(action, item)| {
+                item.hits
+                    .iter()
+                    .find(|hit| (first_line..end_line).contains(&hit.line))
+                    .map(|hit| VisibleAction {
+                        action,
+                        line: hit.line,
+                        column: hit.start,
+                    })
+            })
+            .collect()
+    }
+
+    #[must_use]
     pub fn fragment_line(&self, fragment: &str) -> Option<usize> {
         self.fragments.get(fragment).copied().or_else(|| {
             let decoded = percent_decode_str(fragment).decode_utf8_lossy();
@@ -286,6 +312,22 @@ mod tests {
         let action_line = document.action_line(0).unwrap();
         assert_eq!(document.action_at(action_line, 2), Some(0));
         assert_eq!(document.action_at(action_line, 6), None);
+    }
+
+    #[test]
+    fn visible_actions_only_returns_targets_inside_the_viewport() {
+        let document = ArticleDocument::from_html(
+            "<p><a href='One'>one</a></p><p>gap</p><p><a href='Two'>two</a></p>",
+            60,
+        )
+        .unwrap();
+        let second_line = document.action_line(1).unwrap();
+
+        let visible = document.visible_actions(second_line, 1);
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].action, 1);
+        assert_eq!(visible[0].line, second_line);
     }
 
     #[test]

@@ -31,6 +31,7 @@ const EVENT_TICK: Duration = Duration::from_millis(100);
 const SEARCH_PAGE_LENGTH: usize = 20;
 const MAX_QUERY_CHARS: usize = 512;
 const MAX_ARTICLE_HISTORY: usize = 64;
+const HINT_KEYS: &[u8] = b"ASDFGHJKL";
 static NEXT_ASSET_ID: AtomicU64 = AtomicU64::new(1);
 
 const ACCENT: Color = Color::Cyan;
@@ -164,6 +165,20 @@ struct ArticleSnapshot {
     selected_action: Option<usize>,
 }
 
+#[derive(Debug, Clone)]
+struct HintCandidate {
+    action: usize,
+    label: String,
+    line: usize,
+    column: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct HintState {
+    typed: String,
+    candidates: Vec<HintCandidate>,
+}
+
 struct App {
     client: KiwixClient,
     tx: Sender<WorkerMessage>,
@@ -196,6 +211,7 @@ struct App {
     article_selected_action: Option<usize>,
     article_pending_fragment: Option<String>,
     article_history: VecDeque<ArticleSnapshot>,
+    hint_state: Option<HintState>,
     asset_directory: tempfile::TempDir,
 }
 
@@ -234,6 +250,7 @@ impl App {
             article_selected_action: None,
             article_pending_fragment: None,
             article_history: VecDeque::new(),
+            hint_state: None,
             asset_directory: tempfile::tempdir()
                 .context("failed to create temporary image directory")?,
         })
@@ -260,7 +277,10 @@ impl App {
                         self.append_query(&value);
                         needs_draw = true;
                     }
-                    Event::Resize(_, _) => needs_draw = true,
+                    Event::Resize(_, _) => {
+                        self.hint_state = None;
+                        needs_draw = true;
+                    }
                     Event::Mouse(mouse) => {
                         self.handle_mouse(mouse);
                         needs_draw = true;
@@ -275,6 +295,10 @@ impl App {
     fn handle_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.should_quit = true;
+            return;
+        }
+        if self.hint_state.is_some() {
+            self.handle_hint_key(key);
             return;
         }
         if self.search_open {
@@ -376,6 +400,7 @@ impl App {
             KeyCode::Tab => self.select_article_action(true),
             KeyCode::BackTab => self.select_article_action(false),
             KeyCode::Enter | KeyCode::Char('l') => self.activate_selected_action(),
+            KeyCode::Char('f') => self.open_hint_mode(),
             KeyCode::Char('j') | KeyCode::Down => self.scroll_article(1),
             KeyCode::Char('k') | KeyCode::Up => self.scroll_article(-1),
             KeyCode::PageDown | KeyCode::Char(' ') => {
@@ -394,8 +419,95 @@ impl App {
         }
     }
 
+    fn open_hint_mode(&mut self) {
+        let Some(document) = &self.article_document else {
+            return;
+        };
+        let visible = document.visible_actions(
+            usize::from(self.article_scroll),
+            usize::from(self.article_view_height),
+        );
+        if visible.is_empty() {
+            self.notice = Some("No visible links or images".to_owned());
+            return;
+        }
+        let labels = hint_labels(visible.len());
+        let candidates = visible
+            .into_iter()
+            .zip(labels)
+            .map(|(position, label)| HintCandidate {
+                action: position.action,
+                label,
+                line: position.line,
+                column: position.column,
+            })
+            .collect();
+        self.hint_state = Some(HintState {
+            typed: String::new(),
+            candidates,
+        });
+        self.notice = Some("Type a hint label; Esc cancels".to_owned());
+    }
+
+    fn handle_hint_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.hint_state = None;
+                self.notice = Some("Hint mode cancelled".to_owned());
+            }
+            KeyCode::Backspace => {
+                if let Some(state) = &mut self.hint_state {
+                    state.typed.pop();
+                }
+            }
+            KeyCode::Char(character)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                let character = character.to_ascii_uppercase();
+                if character.is_ascii() && HINT_KEYS.contains(&(character as u8)) {
+                    if let Some(state) = &mut self.hint_state {
+                        state.typed.push(character);
+                    }
+                    self.resolve_hint_input();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn resolve_hint_input(&mut self) {
+        let Some(state) = &self.hint_state else {
+            return;
+        };
+        let matching = state
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.label.starts_with(&state.typed))
+            .collect::<Vec<_>>();
+        if matching.is_empty() {
+            self.hint_state = None;
+            self.notice = Some("No matching hint".to_owned());
+            return;
+        }
+        if let Some(action) = matching
+            .iter()
+            .find(|candidate| candidate.label == state.typed)
+            .map(|candidate| candidate.action)
+        {
+            self.hint_state = None;
+            self.article_selected_action = Some(action);
+            self.activate_article_action(action);
+        }
+    }
+
     fn handle_mouse(&mut self, mouse: MouseEvent) {
-        if self.search_open || self.help_open || self.view != View::Article {
+        if self.search_open
+            || self.help_open
+            || self.hint_state.is_some()
+            || self.view != View::Article
+        {
             return;
         }
         match mouse.kind {
@@ -799,6 +911,7 @@ impl App {
         self.loading = Some(loading);
         self.notice = None;
         self.error = None;
+        self.hint_state = None;
         self.generation
     }
 
@@ -878,6 +991,7 @@ impl App {
         self.loading = None;
         self.error = None;
         self.notice = None;
+        self.hint_state = None;
         match self.view {
             View::Article if !self.article_history.is_empty() => self.restore_previous_article(),
             View::Article => self.view = self.article_parent,
@@ -1025,6 +1139,9 @@ impl App {
             View::Article => self.render_article(frame, rows[1]),
         }
         self.render_footer(frame, rows[2]);
+        if self.hint_state.is_some() {
+            self.render_hints(frame);
+        }
         if self.help_open {
             Self::render_help(frame, area);
         }
@@ -1166,13 +1283,53 @@ impl App {
         }
     }
 
+    fn render_hints(&self, frame: &mut Frame) {
+        let Some(state) = &self.hint_state else {
+            return;
+        };
+        let area = self.article_content_area;
+        for candidate in state
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.label.starts_with(&state.typed))
+        {
+            let Some(row) = candidate.line.checked_sub(usize::from(self.article_scroll)) else {
+                continue;
+            };
+            let Ok(row) = u16::try_from(row) else {
+                continue;
+            };
+            let Ok(column) = u16::try_from(candidate.column) else {
+                continue;
+            };
+            let x = area.x.saturating_add(column);
+            let y = area.y.saturating_add(row);
+            if x >= area.right() || y >= area.bottom() {
+                continue;
+            }
+            let label_width = u16::try_from(candidate.label.len()).unwrap_or(u16::MAX);
+            let width = label_width.min(area.right().saturating_sub(x));
+            frame.render_widget(
+                Paragraph::new(candidate.label.clone()).style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::LightYellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Rect::new(x, y, width, 1),
+            );
+        }
+    }
+
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let commands = match self.view {
             View::Libraries => "j/k move   Enter home   / search   R random   r reload   q quit",
             View::Results => "j/k move   Enter read   / search   R random   n/p page   h back",
-            View::Article => "j/k scroll   Space/b page   Tab action   Enter open   h back",
+            View::Article => "j/k scroll   Space/b page   f hints   Tab action   Enter open",
         };
-        let context = if self.view == View::Article {
+        let context = if let Some(hints) = &self.hint_state {
+            format!("Hint: {}  Esc cancel", hints.typed)
+        } else if self.view == View::Article {
             self.article_selected_action
                 .and_then(|selected| self.article_document.as_ref()?.actions().get(selected))
                 .map_or_else(
@@ -1206,6 +1363,7 @@ impl App {
             Line::from("r                 Reload current view"),
             Line::from("R                 Random article from current library"),
             Line::from("Tab / Shift-Tab   Select article link or image"),
+            Line::from("f                 Show hints for visible links and images"),
             Line::from("Enter / click     Open selected article action"),
             Line::from("Space / b         Page down / page up"),
             Line::from("h / q / Escape    Back"),
@@ -1294,6 +1452,29 @@ fn visible_tail(value: &str, maximum_width: usize) -> String {
         characters.push(character);
     }
     characters.into_iter().rev().collect()
+}
+
+fn hint_labels(count: usize) -> Vec<String> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let base = HINT_KEYS.len();
+    let mut width = 1;
+    let mut capacity = base;
+    while capacity < count {
+        width += 1;
+        capacity = capacity.saturating_mul(base);
+    }
+    (0..count)
+        .map(|mut index| {
+            let mut label = vec![HINT_KEYS[0]; width];
+            for position in (0..width).rev() {
+                label[position] = HINT_KEYS[index % base];
+                index /= base;
+            }
+            label.into_iter().map(char::from).collect()
+        })
+        .collect()
 }
 
 fn format_error(error: anyhow::Error) -> String {
@@ -1432,6 +1613,41 @@ mod tests {
     fn search_input_keeps_a_unicode_width_bounded_tail() {
         assert_eq!(visible_tail("abcdef", 4), "cdef");
         assert_eq!(visible_tail("ab中文", 4), "中文");
+    }
+
+    #[test]
+    fn hint_labels_are_short_unique_and_fixed_width() {
+        assert_eq!(hint_labels(3), ["A", "S", "D"]);
+        let labels = hint_labels(10);
+        assert_eq!(labels.len(), 10);
+        assert!(labels.iter().all(|label| label.len() == 2));
+        let mut unique = labels.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), labels.len());
+    }
+
+    #[test]
+    fn f_hint_activates_a_visible_internal_fragment() {
+        let mut app = app();
+        app.view = View::Article;
+        app.article_locator = "/content/wiki/Page".to_owned();
+        app.article_view_height = 20;
+        app.article_document = Some(
+            ArticleDocument::from_html(
+                "<p><a href='#target'>jump</a></p><p id='target'>Target</p>",
+                60,
+            )
+            .unwrap(),
+        );
+
+        app.handle_article_key(KeyCode::Char('f'));
+        assert_eq!(app.hint_state.as_ref().unwrap().candidates[0].label, "A");
+        app.handle_hint_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+
+        assert!(app.hint_state.is_none());
+        assert_eq!(app.article_selected_action, Some(0));
+        assert_eq!(app.notice.as_deref(), Some("Section #target"));
     }
 
     #[test]

@@ -120,6 +120,7 @@ Select a library and press `Enter` to open its home page. Press `/` when you wan
 | `r` | Reload the current view |
 | `R` | Open a random article from the current library |
 | `Tab` / `Shift-Tab` | Select the next / previous article link or image |
+| `f` | Show Vimium-style hints for visible links and images |
 | Mouse click | Open a link or image under the pointer |
 | Mouse wheel | Scroll an article |
 | `h` / `q` / `Esc` | Go back; `q` exits from the library list |
@@ -127,6 +128,8 @@ Select a library and press `Enter` to open its home page. Press `/` when you wan
 | `Ctrl-C` | Exit and restore the terminal |
 
 Articles are parsed by the `html2text` rich HTML5 engine. Headings, emphasis, code, tables, links, and images receive distinct terminal styles. Internal Wiki links open inside the TUI and keep article history. External links use the system opener.
+
+In an article, press `f` to place short yellow hints over links and images in the current viewport. Type the displayed hint to open its target, use `Backspace` to correct input, or press `Esc` to cancel.
 
 Authenticated images are downloaded to a session-scoped temporary directory before the system image application is launched. Small Wiki formula SVGs retain their vector paths and `viewBox`, but are written with a `1400x700` display canvas for readability. Temporary files are removed when the application exits.
 
