@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![最新 Release](https://img.shields.io/github/v/release/joey5403/kiwix-cli?label=release)](https://github.com/joey5403/kiwix-cli/releases/latest) [![AUR 状态](https://img.shields.io/badge/AUR-尚未发布-lightgrey)](https://aur.archlinux.org/packages?K=kiwix-cli)
+[![最新 Release](https://img.shields.io/github/v/release/joey5403/kiwix-cli?label=release)](https://github.com/joey5403/kiwix-cli/releases/latest) [![AUR 版本](https://img.shields.io/aur/version/kiwix-cli-bin?label=AUR)](https://aur.archlinux.org/packages/kiwix-cli-bin)
 
 使用 Rust、Ratatui 和 Crossterm 开发的键盘优先 Kiwix 终端阅读器。默认连接 Kiwix 公共 Browse 服务，也可以配置为自建 Kiwix 服务；支持文库主页、全文搜索、随机文章、富样式文章阅读、内部链接跳转和外部图片查看，适合本地终端和 SSH 环境。
 
@@ -19,15 +19,13 @@
 
 #### AUR
 
-当前 AUR 尚未发布官方 `kiwix-cli`、`kiwix-cli-bin` 或 `kiwix-cli-git` 包。包发布后，可以使用 AUR 助手安装：
+AUR 已提供官方 `kiwix-cli-bin` 包，可以使用 AUR 助手安装：
 
 ```bash
-yay -S kiwix-cli
+yay -S kiwix-cli-bin
 # 或
-paru -S kiwix-cli
+paru -S kiwix-cli-bin
 ```
-
-在 AUR 包发布前，请使用下面的 GitHub Release 安装方式，或从源码构建。
 
 #### GitHub Release
 

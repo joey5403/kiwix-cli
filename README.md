@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-[![Latest release](https://img.shields.io/github/v/release/joey5403/kiwix-cli?label=release)](https://github.com/joey5403/kiwix-cli/releases/latest) [![AUR package](https://img.shields.io/badge/AUR-not%20published-lightgrey)](https://aur.archlinux.org/packages?K=kiwix-cli)
+[![Latest release](https://img.shields.io/github/v/release/joey5403/kiwix-cli?label=release)](https://github.com/joey5403/kiwix-cli/releases/latest) [![AUR package](https://img.shields.io/aur/version/kiwix-cli-bin?label=AUR)](https://aur.archlinux.org/packages/kiwix-cli-bin)
 
 A keyboard-first Kiwix reader built with Rust, Ratatui, and Crossterm. It connects to the public Kiwix Browse service by default, or one self-hosted Kiwix server when configured, and supports library home pages, full-text search, random articles, styled article reading, internal links, and external image viewing from a terminal or SSH session.
 
@@ -19,15 +19,13 @@ A keyboard-first Kiwix reader built with Rust, Ratatui, and Crossterm. It connec
 
 #### AUR
 
-There is currently no official `kiwix-cli` package in the AUR. Once it is published, install it with an AUR helper:
+The official `kiwix-cli-bin` package is available in the AUR. Install it with an AUR helper:
 
 ```bash
-yay -S kiwix-cli
+yay -S kiwix-cli-bin
 # or
-paru -S kiwix-cli
+paru -S kiwix-cli-bin
 ```
-
-Until then, use the GitHub Release installation below or build from source.
 
 #### GitHub Release
 
