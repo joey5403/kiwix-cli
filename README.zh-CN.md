@@ -4,6 +4,10 @@
 
 [![最新 Release](https://img.shields.io/github/v/release/joey5403/kiwix-cli?label=release)](https://github.com/joey5403/kiwix-cli/releases/latest) [![AUR 版本](https://img.shields.io/aur/version/kiwix-cli-bin?label=AUR)](https://aur.archlinux.org/packages/kiwix-cli-bin)
 
+[![观看使用录制](https://asciinema.org/a/fVV516TzOQImj5JJ.svg)](https://asciinema.org/a/fVV516TzOQImj5JJ)
+
+也可以使用 `asciinema play docs/kiwix-cli.cast` 在本地回放录制。
+
 使用 Rust、Ratatui 和 Crossterm 开发的键盘优先 Kiwix 终端阅读器。默认连接 Kiwix 公共 Browse 服务，也可以配置为自建 Kiwix 服务；支持文库主页、全文搜索、随机文章、富样式文章阅读、内部链接跳转和外部图片查看，适合本地终端和 SSH 环境。
 
 ## 使用说明

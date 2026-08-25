@@ -4,6 +4,10 @@
 
 [![Latest release](https://img.shields.io/github/v/release/joey5403/kiwix-cli?label=release)](https://github.com/joey5403/kiwix-cli/releases/latest) [![AUR package](https://img.shields.io/aur/version/kiwix-cli-bin?label=AUR)](https://aur.archlinux.org/packages/kiwix-cli-bin)
 
+[![Watch the usage recording](https://asciinema.org/a/fVV516TzOQImj5JJ.svg)](https://asciinema.org/a/fVV516TzOQImj5JJ)
+
+Local playback is also available with `asciinema play docs/kiwix-cli.cast`.
+
 A keyboard-first Kiwix reader built with Rust, Ratatui, and Crossterm. It connects to the public Kiwix Browse service by default, or one self-hosted Kiwix server when configured, and supports library home pages, full-text search, random articles, styled article reading, internal links, and external image viewing from a terminal or SSH session.
 
 ## Usage
