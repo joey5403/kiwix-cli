@@ -28,6 +28,12 @@ cargo build --release
 ./target/release/kiwix-cli --help
 ```
 
+To build a Linux release archive containing the binary, license, bilingual README files, and a SHA-256 checksum:
+
+```bash
+./scripts/build-linux.sh
+```
+
 ### Configure
 
 The default server is:
@@ -195,6 +201,8 @@ git diff --check
 ```
 
 The automated test suite uses local mock HTTP servers and does not require a live Kiwix service.
+
+The packaging script targets `x86_64-unknown-linux-gnu` by default. Set `TARGET` to another installed Linux Rust target when needed.
 
 For manual testing against a real service:
 

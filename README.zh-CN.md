@@ -28,6 +28,12 @@ cargo build --release
 ./target/release/kiwix-cli --help
 ```
 
+生成包含 Linux 二进制、许可证、双语 README 和 SHA-256 校验文件的发布压缩包：
+
+```bash
+./scripts/build-linux.sh
+```
+
 ### 配置
 
 默认服务地址为：
@@ -195,6 +201,8 @@ git diff --check
 ```
 
 自动化测试使用本地 mock HTTP 服务，不需要外部 Kiwix 实例。
+
+打包脚本默认目标为 `x86_64-unknown-linux-gnu`。需要其他 Linux Rust target 时，可以通过 `TARGET` 环境变量切换到已安装的目标。
 
 对真实服务进行手工验证：
 
