@@ -17,11 +17,11 @@ A keyboard-first Kiwix reader built with Rust, Ratatui, and Crossterm. It connec
 - A reachable Kiwix server
 - A terminal for interactive mode
 - Rust 1.88 or newer when building from source
-- A system file opener for images, such as `xdg-open` on Linux
+- A system file opener for images, such as `xdg-open` on Linux or `open` on macOS
 
 ### Install
 
-#### AUR
+#### Arch Linux (AUR)
 
 The official `kiwix-cli-bin` package is available in the AUR. Install it with an AUR helper:
 
@@ -31,7 +31,7 @@ yay -S kiwix-cli-bin
 paru -S kiwix-cli-bin
 ```
 
-#### GitHub Release
+#### Linux (GitHub Release)
 
 Download and install the current Linux `x86_64` release:
 
@@ -50,7 +50,9 @@ install -Dm644 "kiwix-cli-${VERSION}-linux-x86_64/man/man1/kiwix-cli.1" "$HOME/.
 
 Ensure `$HOME/.local/bin` is on `PATH` before starting `kiwix-cli`.
 
-On macOS, select the archive for the current architecture (`arm64` on Apple Silicon or `x86_64` on Intel):
+#### macOS (GitHub Release)
+
+The release provides separate archives for Apple Silicon (`arm64`) and Intel (`x86_64`). The command below selects the current architecture automatically:
 
 ```bash
 VERSION=0.1.3
@@ -66,6 +68,30 @@ mkdir -p "$HOME/.local/bin" "$HOME/.local/share/man/man1"
 install -m755 "kiwix-cli-${VERSION}-macos-${ARCH}/kiwix-cli" "$HOME/.local/bin/kiwix-cli"
 install -m644 "kiwix-cli-${VERSION}-macos-${ARCH}/man/man1/kiwix-cli.1" "$HOME/.local/share/man/man1/kiwix-cli.1"
 ```
+
+Add the user binary directory to the default zsh environment, then verify the installation:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
+export PATH="$HOME/.local/bin:$PATH"
+kiwix-cli --version
+man kiwix-cli
+```
+
+The macOS release binaries are ad-hoc signed but not Apple-notarized. If Gatekeeper reports that the downloaded binary cannot be opened, verify the SHA-256 checksum first, then remove only this binary's quarantine attribute:
+
+```bash
+xattr -d com.apple.quarantine "$HOME/.local/bin/kiwix-cli"
+```
+
+Uninstall the user-local macOS installation with:
+
+```bash
+rm "$HOME/.local/bin/kiwix-cli"
+rm "$HOME/.local/share/man/man1/kiwix-cli.1"
+```
+
+#### Build from source
 
 Build and install from this checkout:
 
@@ -268,7 +294,7 @@ The automated test suite uses local mock HTTP servers and does not require a liv
 
 The Linux packaging script targets `x86_64-unknown-linux-gnu` by default. The macOS script builds the current architecture by default; set `TARGET=x86_64-apple-darwin` or `TARGET=aarch64-apple-darwin` when needed.
 
-Linux and macOS release archives include the manual page at `man/man1/kiwix-cli.1`. macOS binaries are ad-hoc signed but not Apple-notarized; when Gatekeeper blocks a browser-downloaded archive, remove quarantine with `xattr -dr com.apple.quarantine kiwix-cli-*/` after verifying its checksum.
+Linux and macOS release archives include the manual page at `man/man1/kiwix-cli.1`. See the macOS installation section above for Gatekeeper guidance.
 
 For manual testing against a real service:
 

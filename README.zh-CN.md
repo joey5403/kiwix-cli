@@ -17,11 +17,11 @@
 - 一个可访问的 Kiwix 服务
 - 交互模式需要真实终端
 - 从源码构建需要 Rust 1.88 或更高版本
-- 查看图片需要系统文件打开器，例如 Linux 下的 `xdg-open`
+- 查看图片需要系统文件打开器，例如 Linux 下的 `xdg-open` 或 macOS 下的 `open`
 
 ### 安装
 
-#### AUR
+#### Arch Linux（AUR）
 
 AUR 已提供官方 `kiwix-cli-bin` 包，可以使用 AUR 助手安装：
 
@@ -31,7 +31,7 @@ yay -S kiwix-cli-bin
 paru -S kiwix-cli-bin
 ```
 
-#### GitHub Release
+#### Linux（GitHub Release）
 
 下载并安装当前 Linux `x86_64` Release：
 
@@ -50,7 +50,9 @@ install -Dm644 "kiwix-cli-${VERSION}-linux-x86_64/man/man1/kiwix-cli.1" "$HOME/.
 
 启动 `kiwix-cli` 前，请确保 `$HOME/.local/bin` 已加入 `PATH`。
 
-在 macOS 上，根据当前架构选择压缩包（Apple Silicon 为 `arm64`，Intel 为 `x86_64`）：
+#### macOS（GitHub Release）
+
+Release 分别提供 Apple Silicon（`arm64`）和 Intel（`x86_64`）压缩包。下面的命令会自动选择当前架构：
 
 ```bash
 VERSION=0.1.3
@@ -66,6 +68,30 @@ mkdir -p "$HOME/.local/bin" "$HOME/.local/share/man/man1"
 install -m755 "kiwix-cli-${VERSION}-macos-${ARCH}/kiwix-cli" "$HOME/.local/bin/kiwix-cli"
 install -m644 "kiwix-cli-${VERSION}-macos-${ARCH}/man/man1/kiwix-cli.1" "$HOME/.local/share/man/man1/kiwix-cli.1"
 ```
+
+将用户二进制目录加入默认 zsh 环境，然后验证安装：
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
+export PATH="$HOME/.local/bin:$PATH"
+kiwix-cli --version
+man kiwix-cli
+```
+
+macOS Release 二进制使用 ad-hoc 签名，但没有经过 Apple notarization。如果 Gatekeeper 提示无法打开下载的二进制，请先确认 SHA-256 校验通过，再只移除该二进制的 quarantine 属性：
+
+```bash
+xattr -d com.apple.quarantine "$HOME/.local/bin/kiwix-cli"
+```
+
+卸载用户目录中的 macOS 安装：
+
+```bash
+rm "$HOME/.local/bin/kiwix-cli"
+rm "$HOME/.local/share/man/man1/kiwix-cli.1"
+```
+
+#### 从源码构建
 
 从当前源码目录安装：
 
@@ -268,7 +294,7 @@ git diff --check
 
 Linux 打包脚本默认目标为 `x86_64-unknown-linux-gnu`。macOS 脚本默认构建当前架构；需要指定架构时可设置 `TARGET=x86_64-apple-darwin` 或 `TARGET=aarch64-apple-darwin`。
 
-Linux 和 macOS 发布压缩包都会把手册页放在 `man/man1/kiwix-cli.1`。macOS 二进制使用 ad-hoc 签名，但没有经过 Apple notarization；如果浏览器下载的包被 Gatekeeper 阻止，请先校验 SHA-256，再运行 `xattr -dr com.apple.quarantine kiwix-cli-*/`。
+Linux 和 macOS 发布压缩包都会把手册页放在 `man/man1/kiwix-cli.1`。Gatekeeper 处理方式参见上面的 macOS 安装章节。
 
 对真实服务进行手工验证：
 
