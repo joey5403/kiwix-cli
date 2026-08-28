@@ -36,7 +36,7 @@ paru -S kiwix-cli-bin
 Download and install the current Linux `x86_64` release:
 
 ```bash
-VERSION=0.1.3
+VERSION=0.2.0
 ARCHIVE="kiwix-cli-${VERSION}-linux-x86_64.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
 
@@ -55,7 +55,7 @@ Ensure `$HOME/.local/bin` is on `PATH` before starting `kiwix-cli`.
 The release provides separate archives for Apple Silicon (`arm64`) and Intel (`x86_64`). The command below selects the current architecture automatically:
 
 ```bash
-VERSION=0.1.3
+VERSION=0.2.0
 ARCH="$(uname -m)"
 ARCHIVE="kiwix-cli-${VERSION}-macos-${ARCH}.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"

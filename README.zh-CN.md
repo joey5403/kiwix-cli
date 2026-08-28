@@ -36,7 +36,7 @@ paru -S kiwix-cli-bin
 下载并安装当前 Linux `x86_64` Release：
 
 ```bash
-VERSION=0.1.3
+VERSION=0.2.0
 ARCHIVE="kiwix-cli-${VERSION}-linux-x86_64.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
 
@@ -55,7 +55,7 @@ install -Dm644 "kiwix-cli-${VERSION}-linux-x86_64/man/man1/kiwix-cli.1" "$HOME/.
 Release 分别提供 Apple Silicon（`arm64`）和 Intel（`x86_64`）压缩包。下面的命令会自动选择当前架构：
 
 ```bash
-VERSION=0.1.3
+VERSION=0.2.0
 ARCH="$(uname -m)"
 ARCHIVE="kiwix-cli-${VERSION}-macos-${ARCH}.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
