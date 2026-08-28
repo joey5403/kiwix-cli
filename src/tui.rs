@@ -26,6 +26,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::article::{ActionKind, ArticleDocument};
 use crate::client::{ArticleReference, ImageResource, KiwixClient};
 use crate::model::{Book, SearchPage, SearchResult};
+use crate::storage::{ReadingStore, SavedArticle};
 
 const EVENT_TICK: Duration = Duration::from_millis(100);
 const SEARCH_PAGE_LENGTH: usize = 20;
@@ -43,6 +44,8 @@ const FAILURE: Color = Color::LightRed;
 enum View {
     Libraries,
     Results,
+    History,
+    Favorites,
     Article,
 }
 
@@ -51,6 +54,7 @@ enum ArticleContext {
     Search,
     Home,
     Random,
+    Saved,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,7 +140,8 @@ pub fn run_tui(client: KiwixClient) -> Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         bail!("interactive mode requires a terminal; use books, search, or read in scripts");
     }
-    let mut app = App::new(client)?;
+    let reading = ReadingStore::load_default().context("failed to load reading data")?;
+    let mut app = App::new(client, reading)?;
     app.load_libraries();
     ratatui::run(|terminal| {
         execute!(stdout(), EnableMouseCapture).context("failed to enable mouse capture")?;
@@ -158,6 +163,7 @@ struct ArticleSnapshot {
     title: String,
     locator: String,
     context: ArticleContext,
+    book: Option<Book>,
     html: Option<String>,
     document: Option<ArticleDocument>,
     render_width: u16,
@@ -198,8 +204,11 @@ struct App {
     query: String,
     search_page: Option<SearchPage>,
     result_state: ListState,
+    saved_state: ListState,
+    reading: ReadingStore,
     article_title: String,
     article_locator: String,
+    article_book: Option<Book>,
     article_parent: View,
     article_context: ArticleContext,
     article_html: Option<String>,
@@ -216,7 +225,7 @@ struct App {
 }
 
 impl App {
-    fn new(client: KiwixClient) -> Result<Self> {
+    fn new(client: KiwixClient, reading: ReadingStore) -> Result<Self> {
         let (tx, rx) = mpsc::channel();
         Ok(Self {
             client,
@@ -237,8 +246,11 @@ impl App {
             query: String::new(),
             search_page: None,
             result_state: ListState::default(),
+            saved_state: ListState::default(),
+            reading,
             article_title: String::new(),
             article_locator: String::new(),
+            article_book: None,
             article_parent: View::Libraries,
             article_context: ArticleContext::Search,
             article_html: None,
@@ -315,10 +327,23 @@ impl App {
             self.help_open = true;
             return;
         }
+        if key.code == KeyCode::Char('H') {
+            self.open_saved_view(View::History);
+            return;
+        }
+        if key.code == KeyCode::Char('B') {
+            self.open_saved_view(View::Favorites);
+            return;
+        }
+        if self.view == View::Article && key.code == KeyCode::Char('F') {
+            self.toggle_current_favorite();
+            return;
+        }
 
         match self.view {
             View::Libraries => self.handle_library_key(key.code),
             View::Results => self.handle_result_key(key.code),
+            View::History | View::Favorites => self.handle_saved_key(key.code),
             View::Article => self.handle_article_key(key.code),
         }
     }
@@ -392,6 +417,157 @@ impl App {
             KeyCode::Char('R') => self.load_random_article(),
             KeyCode::Char('h' | 'q') | KeyCode::Esc => self.go_back(),
             _ => {}
+        }
+    }
+
+    fn handle_saved_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('j') | KeyCode::Down => {
+                let length = self.saved_articles_len();
+                move_selection(&mut self.saved_state, length, true);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                let length = self.saved_articles_len();
+                move_selection(&mut self.saved_state, length, false);
+            }
+            KeyCode::Char('g') | KeyCode::Home => {
+                let length = self.saved_articles_len();
+                select_first(&mut self.saved_state, length);
+            }
+            KeyCode::Char('G') | KeyCode::End => {
+                let length = self.saved_articles_len();
+                select_last(&mut self.saved_state, length);
+            }
+            KeyCode::Enter | KeyCode::Char('l') => self.load_selected_saved_article(),
+            KeyCode::Char('d') => self.remove_selected_saved_article(),
+            KeyCode::Char('h' | 'q') | KeyCode::Esc => self.go_back(),
+            _ => {}
+        }
+    }
+
+    fn open_saved_view(&mut self, view: View) {
+        debug_assert!(matches!(view, View::History | View::Favorites));
+        self.generation = self.generation.wrapping_add(1);
+        self.loading = None;
+        self.error = None;
+        self.hint_state = None;
+        self.view = view;
+        let length = self.saved_articles_len();
+        select_first(&mut self.saved_state, length);
+        self.notice = Some(match view {
+            View::History => format!("{length} history entries"),
+            View::Favorites => format!("{length} favorites"),
+            _ => unreachable!(),
+        });
+    }
+
+    fn saved_articles_len(&self) -> usize {
+        let server = self.client.server_key();
+        match self.view {
+            View::History => self.reading.history(server).count(),
+            View::Favorites => self.reading.favorites(server).count(),
+            _ => 0,
+        }
+    }
+
+    fn selected_saved_article(&self) -> Option<SavedArticle> {
+        let index = self.saved_state.selected()?;
+        let server = self.client.server_key();
+        match self.view {
+            View::History => self.reading.history(server).nth(index).cloned(),
+            View::Favorites => self.reading.favorites(server).nth(index).cloned(),
+            _ => None,
+        }
+    }
+
+    fn load_selected_saved_article(&mut self) {
+        let Some(article) = self.selected_saved_article() else {
+            return;
+        };
+        if let Some(index) = self
+            .libraries
+            .iter()
+            .position(|book| book.id == article.book_id || book.content_id == article.content_id)
+        {
+            self.library_state.select(Some(index));
+        } else {
+            self.library_state.select(None);
+        }
+        let parent = self.view;
+        self.article_history.clear();
+        self.load_article(
+            SearchResult {
+                title: article.title.clone(),
+                locator: article.locator.clone(),
+                excerpt: None,
+            },
+            Some(article.book()),
+            parent,
+            ArticleContext::Saved,
+            None,
+            false,
+        );
+    }
+
+    fn remove_selected_saved_article(&mut self) {
+        let Some(article) = self.selected_saved_article() else {
+            return;
+        };
+        let server = self.client.server_key().to_owned();
+        let result = match self.view {
+            View::History => self.reading.remove_history(&server, &article.locator),
+            View::Favorites => self.reading.remove_favorite(&server, &article.locator),
+            _ => return,
+        };
+        match result {
+            Ok(()) => {
+                self.notice = Some(match self.view {
+                    View::History => "Removed from history".to_owned(),
+                    View::Favorites => "Removed from favorites".to_owned(),
+                    _ => unreachable!(),
+                });
+                let length = self.saved_articles_len();
+                let selected = self
+                    .saved_state
+                    .selected()
+                    .unwrap_or(0)
+                    .min(length.saturating_sub(1));
+                self.saved_state.select((length > 0).then_some(selected));
+            }
+            Err(error) => self.error = Some(format_error(error)),
+        }
+    }
+
+    fn toggle_current_favorite(&mut self) {
+        let Some(article) = self.current_saved_article() else {
+            self.error = Some("Wait for the article to finish loading".to_owned());
+            return;
+        };
+        match self.reading.toggle_favorite(article) {
+            Ok(true) => self.notice = Some("Added to favorites".to_owned()),
+            Ok(false) => self.notice = Some("Removed from favorites".to_owned()),
+            Err(error) => self.error = Some(format_error(error)),
+        }
+    }
+
+    fn current_saved_article(&self) -> Option<SavedArticle> {
+        if self.article_locator.is_empty() || self.article_html.is_none() {
+            return None;
+        }
+        Some(SavedArticle::new(
+            self.client.server_key(),
+            self.article_book.as_ref()?,
+            &self.article_title,
+            &self.article_locator,
+        ))
+    }
+
+    fn record_current_visit(&mut self) {
+        let Some(article) = self.current_saved_article() else {
+            return;
+        };
+        if let Err(error) = self.reading.record_visit(article) {
+            self.error = Some(format_error(error));
         }
     }
 
@@ -603,6 +779,7 @@ impl App {
                         locator,
                         excerpt: None,
                     },
+                    self.article_book.clone(),
                     self.article_parent,
                     self.article_context,
                     fragment,
@@ -738,13 +915,22 @@ impl App {
         let Some(result) = self.selected_result().cloned() else {
             return;
         };
+        let book = self.selected_library().cloned();
         self.article_history.clear();
-        self.load_article(result, View::Results, ArticleContext::Search, None, false);
+        self.load_article(
+            result,
+            book,
+            View::Results,
+            ArticleContext::Search,
+            None,
+            false,
+        );
     }
 
     fn load_article(
         &mut self,
         result: SearchResult,
+        book: Option<Book>,
         parent: View,
         context: ArticleContext,
         fragment: Option<String>,
@@ -758,6 +944,7 @@ impl App {
         self.article_context = context;
         self.article_title.clone_from(&result.title);
         self.article_locator.clone_from(&result.locator);
+        self.article_book = book;
         self.article_html = None;
         self.article_document = None;
         self.article_scroll = 0;
@@ -814,6 +1001,7 @@ impl App {
         self.article_context = landing.article_context();
         self.article_title.clone_from(&book.title);
         self.article_locator.clear();
+        self.article_book = Some(book.clone());
         self.article_html = None;
         self.article_document = None;
         self.article_scroll = 0;
@@ -899,6 +1087,7 @@ impl App {
                 locator: self.article_locator.clone(),
                 excerpt: None,
             },
+            self.article_book.clone(),
             self.article_parent,
             self.article_context,
             None,
@@ -970,6 +1159,7 @@ impl App {
                             self.article_document = None;
                             self.article_render_width = 0;
                             self.article_pending_fragment = fragment;
+                            self.record_current_visit();
                         }
                         Err(error) => self.error = Some(error),
                     }
@@ -995,7 +1185,7 @@ impl App {
         match self.view {
             View::Article if !self.article_history.is_empty() => self.restore_previous_article(),
             View::Article => self.view = self.article_parent,
-            View::Results => self.view = View::Libraries,
+            View::Results | View::History | View::Favorites => self.view = View::Libraries,
             View::Libraries => self.should_quit = true,
         }
     }
@@ -1011,6 +1201,7 @@ impl App {
             title: self.article_title.clone(),
             locator: self.article_locator.clone(),
             context: self.article_context,
+            book: self.article_book.clone(),
             html: self.article_html.take(),
             document: self.article_document.take(),
             render_width: self.article_render_width,
@@ -1027,6 +1218,7 @@ impl App {
         self.article_title = snapshot.title;
         self.article_locator = snapshot.locator;
         self.article_context = snapshot.context;
+        self.article_book = snapshot.book;
         self.article_html = snapshot.html;
         self.article_document = snapshot.document;
         self.article_render_width = snapshot.render_width;
@@ -1136,6 +1328,7 @@ impl App {
         match self.view {
             View::Libraries => self.render_libraries(frame, rows[1]),
             View::Results => self.render_results(frame, rows[1]),
+            View::History | View::Favorites => self.render_saved_articles(frame, rows[1]),
             View::Article => self.render_article(frame, rows[1]),
         }
         self.render_footer(frame, rows[2]);
@@ -1157,12 +1350,15 @@ impl App {
                 || "Search".to_owned(),
                 |book| format!("{} / Search", book.title),
             ),
+            View::History => "History / All libraries".to_owned(),
+            View::Favorites => "Favorites / All libraries".to_owned(),
             View::Article => format!(
                 "{} / {}",
                 match self.article_context {
                     ArticleContext::Search => "Search",
                     ArticleContext::Home => "Home",
                     ArticleContext::Random => "Random",
+                    ArticleContext::Saved => "Saved",
                 },
                 self.article_title
             ),
@@ -1257,12 +1453,57 @@ impl App {
         frame.render_stateful_widget(list, area, &mut self.result_state);
     }
 
+    fn render_saved_articles(&mut self, frame: &mut Frame, area: Rect) {
+        let server = self.client.server_key();
+        let entries = match self.view {
+            View::History => self.reading.history(server).collect::<Vec<_>>(),
+            View::Favorites => self.reading.favorites(server).collect::<Vec<_>>(),
+            _ => return,
+        };
+        let items = entries
+            .iter()
+            .map(|article| {
+                ListItem::new(vec![
+                    Line::from(Span::styled(
+                        article.title.clone(),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(vec![
+                        Span::styled(article.book_title.clone(), Style::default().fg(ACCENT)),
+                        Span::styled(format!("  {}", article.locator), Style::default().fg(MUTED)),
+                    ]),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let title = match self.view {
+            View::History => format!(" History [{}] ", items.len()),
+            View::Favorites => format!(" Favorites [{}] ", items.len()),
+            _ => unreachable!(),
+        };
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .highlight_symbol("> ")
+            .highlight_style(Style::default().fg(Color::Black).bg(ACCENT));
+        frame.render_stateful_widget(list, area, &mut self.saved_state);
+    }
+
     fn render_article(&mut self, frame: &mut Frame, area: Rect) {
-        let title = if self.article_title.is_empty() {
+        let mut title = if self.article_title.is_empty() {
             " Article ".to_owned()
         } else {
             format!(" {} ", self.article_title)
         };
+        if self
+            .reading
+            .is_favorite(self.client.server_key(), &self.article_locator)
+        {
+            let article_title = if self.article_title.is_empty() {
+                "Article"
+            } else {
+                &self.article_title
+            };
+            title = format!(" {article_title} [favorite] ");
+        }
         let block = Block::default().borders(Borders::ALL).title(title);
         let inner = block.inner(area);
         self.article_content_area = inner;
@@ -1323,9 +1564,11 @@ impl App {
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let commands = match self.view {
-            View::Libraries => "j/k move   Enter home   / search   R random   r reload   q quit",
-            View::Results => "j/k move   Enter read   / search   R random   n/p page   h back",
-            View::Article => "j/k scroll   Space/b page   f hints   Tab action   Enter open",
+            View::Libraries => "j/k move   Enter home   / search   H history   B favorites",
+            View::Results => "j/k move   Enter read   H history   B favorites   n/p page",
+            View::History => "j/k move   Enter read   d delete   B favorites   h back",
+            View::Favorites => "j/k move   Enter read   d delete   H history   h back",
+            View::Article => "j/k scroll   f hints   F favorite   H history   B favorites",
         };
         let context = if let Some(hints) = &self.hint_state {
             format!("Hint: {}  Esc cancel", hints.typed)
@@ -1347,7 +1590,7 @@ impl App {
     }
 
     fn render_help(frame: &mut Frame, area: Rect) {
-        let popup = centered_rect(area, 70, 18);
+        let popup = centered_rect(area, 72, 22);
         frame.render_widget(Clear, popup);
         let help = Paragraph::new(vec![
             Line::from(Span::styled(
@@ -1362,6 +1605,10 @@ impl App {
             Line::from("n / p             Next / previous results page"),
             Line::from("r                 Reload current view"),
             Line::from("R                 Random article from current library"),
+            Line::from("H                 Open global history"),
+            Line::from("B                 Open global favorites"),
+            Line::from("F                 Toggle favorite for the current article"),
+            Line::from("d                 Delete a history or favorite entry"),
             Line::from("Tab / Shift-Tab   Select article link or image"),
             Line::from("f                 Show hints for visible links and images"),
             Line::from("Enter / click     Open selected article action"),
@@ -1594,6 +1841,7 @@ mod tests {
                 Duration::from_secs(1),
             )
             .unwrap(),
+            ReadingStore::in_memory(),
         )
         .unwrap()
     }
@@ -1794,6 +2042,130 @@ mod tests {
                 .back()
                 .map(|snapshot| snapshot.locator.as_str()),
             Some("/content/wiki/66")
+        );
+    }
+
+    #[test]
+    fn successful_article_load_is_added_to_global_history() {
+        let mut app = app();
+        app.generation = 7;
+        app.article_book = Some(Book {
+            id: "book-id".to_owned(),
+            content_id: "wiki".to_owned(),
+            title: "Wiki".to_owned(),
+        });
+        app.tx
+            .send(WorkerMessage::Article {
+                generation: 7,
+                title: "Rust".to_owned(),
+                locator: "/content/wiki/Rust".to_owned(),
+                fragment: None,
+                result: Ok("<h1>Rust</h1>".to_owned()),
+            })
+            .unwrap();
+
+        assert!(app.receive_worker_messages());
+
+        let history = app
+            .reading
+            .history("https://kiwix.example.test/")
+            .collect::<Vec<_>>();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].title, "Rust");
+        assert_eq!(history[0].book_title, "Wiki");
+    }
+
+    #[test]
+    fn global_history_opens_an_article_in_its_source_library() {
+        let mut app = app();
+        app.libraries = vec![
+            Book {
+                id: "first-book".to_owned(),
+                content_id: "first".to_owned(),
+                title: "First".to_owned(),
+            },
+            Book {
+                id: "second-book".to_owned(),
+                content_id: "second".to_owned(),
+                title: "Second".to_owned(),
+            },
+        ];
+        app.library_state.select(Some(0));
+        app.reading
+            .record_visit(SavedArticle::new(
+                app.client.server_key(),
+                &app.libraries[1],
+                "Saved article",
+                "/content/second/Saved",
+            ))
+            .unwrap();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+        assert_eq!(app.view, View::History);
+        app.handle_saved_key(KeyCode::Enter);
+
+        assert_eq!(app.view, View::Article);
+        assert_eq!(app.article_parent, View::History);
+        assert_eq!(app.library_state.selected(), Some(1));
+        assert_eq!(app.article_book.as_ref().unwrap().title, "Second");
+    }
+
+    #[test]
+    fn renders_global_history_with_source_library_and_controls() {
+        let mut app = app();
+        app.reading
+            .record_visit(SavedArticle::new(
+                app.client.server_key(),
+                &Book {
+                    id: "book-id".to_owned(),
+                    content_id: "wiki".to_owned(),
+                    title: "Wikipedia".to_owned(),
+                },
+                "Rust",
+                "/content/wiki/Rust",
+            ))
+            .unwrap();
+        app.open_saved_view(View::History);
+        let backend = TestBackend::new(72, 14);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| app.render(frame)).unwrap();
+
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(screen.contains("History [1]"));
+        assert!(screen.contains("Rust"));
+        assert!(screen.contains("Wikipedia"));
+        assert!(screen.contains("d delete"));
+    }
+
+    #[test]
+    fn favorite_key_toggles_the_loaded_article() {
+        let mut app = app();
+        app.view = View::Article;
+        app.article_title = "Favorite".to_owned();
+        app.article_locator = "/content/wiki/Favorite".to_owned();
+        app.article_html = Some("<h1>Favorite</h1>".to_owned());
+        app.article_book = Some(Book {
+            id: "book-id".to_owned(),
+            content_id: "wiki".to_owned(),
+            title: "Wiki".to_owned(),
+        });
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
+        assert!(
+            app.reading
+                .is_favorite(app.client.server_key(), &app.article_locator)
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
+        assert!(
+            !app.reading
+                .is_favorite(app.client.server_key(), &app.article_locator)
         );
     }
 

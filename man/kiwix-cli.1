@@ -54,6 +54,9 @@ HTTP Basic Auth username.
 .TP
 .B KIWIX_PASSWORD
 HTTP Basic Auth password. It is intentionally not accepted as a command-line option.
+.TP
+.B KIWIX_CLI_DATA_DIR
+Directory containing \\fBreading.json\\fR, which stores persistent history and favorites. The platform application data directory is used by default.
 .SH COMMANDS
 .TP
 .B books
@@ -96,12 +99,22 @@ Beginning or end.
 Reload the current view.
 .IP "R" 4
 Open a random article from the current library.
+.IP "H" 4
+Open browsing history across all libraries on the current server.
+.IP "B" 4
+Open favorites across all libraries on the current server.
+.IP "F" 4
+Add or remove the current article from favorites.
+.IP "d" 4
+Delete the selected history or favorite entry.
 .IP "h / q / Escape" 4
 Go back. Press \fBq\fR in the library list to quit.
 .IP "Ctrl-C" 4
 Exit and restore the terminal.
 .PP
 Article HTML is rendered with styles for headings, emphasis, code, tables, links, and images. Internal Wiki links keep article history. Images are downloaded with the configured credentials before an external opener is launched. Small formula SVGs are rewritten as a larger vector SVG while retaining their paths and viewBox.
+.PP
+Successfully loaded articles are stored in persistent browsing history. History and favorites are unified across books, retain their source book and server, and only show entries belonging to the currently configured server.
 .SH EXAMPLES
 .EX
 export KIWIX_URL=https://wiki.example.com

@@ -96,6 +96,10 @@ impl KiwixClient {
         parse_catalog(&body).context("failed to parse Kiwix catalog")
     }
 
+    pub(crate) fn server_key(&self) -> &str {
+        self.base.as_str()
+    }
+
     /// Searches one library by its catalog UUID.
     ///
     /// # Errors

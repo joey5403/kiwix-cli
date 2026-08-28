@@ -164,6 +164,10 @@ Select a library and press `Enter` to open its home page. Press `/` when you wan
 | `Space` / `b` | Page down / page up in an article |
 | `r` | Reload the current view |
 | `R` | Open a random article from the current library |
+| `H` | Open browsing history across all libraries on the current server |
+| `B` | Open favorites across all libraries on the current server |
+| `F` | Add or remove the current article from favorites |
+| `d` | Delete the selected history or favorite entry |
 | `Tab` / `Shift-Tab` | Select the next / previous article link or image |
 | `f` | Show Vimium-style hints for visible links and images |
 | Mouse click | Open a link or image under the pointer |
@@ -173,6 +177,8 @@ Select a library and press `Enter` to open its home page. Press `/` when you wan
 | `Ctrl-C` | Exit and restore the terminal |
 
 Articles are parsed by the `html2text` rich HTML5 engine. Headings, emphasis, code, tables, links, and images receive distinct terminal styles. Internal Wiki links open inside the TUI and keep article history. External links use the system opener.
+
+Successfully loaded articles are added to persistent browsing history. History and favorites use one unified list across books, while each entry retains its source book and normalized server address. Only entries for the currently configured server are shown. Data is stored in the platform application data directory (`~/.local/share/kiwix-cli/reading.json` on Linux); set `KIWIX_CLI_DATA_DIR` to override its parent directory.
 
 In an article, press `f` to place short yellow hints over links and images in the current viewport. Type the displayed hint to open its target, use `Backspace` to correct input, or press `Esc` to cancel.
 
