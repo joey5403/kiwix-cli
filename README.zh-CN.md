@@ -4,7 +4,7 @@
 
 [![最新 Release](https://img.shields.io/github/v/release/joey5403/kiwix-cli?label=release)](https://github.com/joey5403/kiwix-cli/releases/latest) [![AUR 版本](https://img.shields.io/aur/version/kiwix-cli-bin?label=AUR)](https://aur.archlinux.org/packages/kiwix-cli-bin)
 
-[![观看使用录制](https://asciinema.org/a/sYhv1UpE7iS1akCg.svg)](https://asciinema.org/a/sYhv1UpE7iS1akCg)
+[![观看使用录制](https://asciinema.org/a/2ebmpLbJCZaK2lIt.svg)](https://asciinema.org/a/2ebmpLbJCZaK2lIt)
 
 也可以使用 `asciinema play docs/kiwix-cli.cast` 在本地回放录制。
 
