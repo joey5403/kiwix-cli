@@ -33,6 +33,29 @@ fn books_lists_authenticated_catalog() {
 }
 
 #[test]
+fn server_subpath_is_preserved_for_catalog_requests() {
+    let server = MockServer::start();
+    let catalog = format!(
+        r#"<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>urn:uuid:{BOOK_ID}</id><title>Rust Docs</title><link href="/content/rust_docs" /></entry></feed>"#
+    );
+    let mock = server.mock(|when, then| {
+        when.method(GET)
+            .path("/kiwix/catalog/v2/entries")
+            .query_param("count", "-1");
+        then.status(200).body(catalog);
+    });
+
+    Command::cargo_bin("kiwix-cli")
+        .unwrap()
+        .env("KIWIX_URL", format!("{}/kiwix", server.base_url()))
+        .arg("books")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Rust Docs"));
+    mock.assert();
+}
+
+#[test]
 fn search_builds_kiwix_query_and_prints_locator() {
     let server = MockServer::start();
     let mock = server.mock(|when, then| {

@@ -8,6 +8,7 @@ use mdictlib::MdxFile;
 
 const MAX_DEFINITIONS: usize = 5;
 const MAX_DEFINITION_CHARS: usize = 12_000;
+const MAX_ENTRY_CHARS: usize = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DictionaryDefinition {
@@ -174,7 +175,11 @@ impl MdxDirectoryProvider {
             else {
                 continue;
             };
-            let text = html2text::from_read(entry.text().as_bytes(), 72)
+            let raw_text = entry.text();
+            if raw_text.chars().count() > MAX_ENTRY_CHARS {
+                continue;
+            }
+            let text = html2text::from_read(raw_text.as_bytes(), 72)
                 .context("failed to render dictionary entry")?;
             let text = text.chars().take(MAX_DEFINITION_CHARS).collect();
             definitions.push(DictionaryDefinition {

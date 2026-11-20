@@ -2210,6 +2210,24 @@ fn open_image_resource(
     Ok(())
 }
 
+fn validate_svg_element(event: &quick_xml::events::BytesStart<'_>) -> Result<()> {
+    let name = event.local_name();
+    if matches!(
+        name.as_ref(),
+        "script" | "foreignObject" | "iframe" | "object" | "embed"
+    ) {
+        bail!("unsafe SVG element is not supported");
+    }
+    for attribute in event.attributes() {
+        let attribute = attribute.context("invalid SVG attribute")?;
+        let key = attribute.key.local_name();
+        if key.as_ref().starts_with("on") || matches!(key.as_ref(), "href" | "src" | "xlink:href") {
+            bail!("unsafe SVG attribute is not supported");
+        }
+    }
+    Ok(())
+}
+
 fn scale_svg(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut reader = XmlReader::from_reader(bytes);
     let mut writer = XmlWriter::new(Vec::with_capacity(bytes.len()));
@@ -2222,6 +2240,7 @@ fn scale_svg(bytes: &[u8]) -> Result<Vec<u8>> {
                     bail!("image marked as SVG does not have an svg root element");
                 }
                 root_seen = true;
+                validate_svg_element(&event)?;
                 let mut scaled = event.to_owned();
                 let attributes = event
                     .attributes()
@@ -2245,6 +2264,18 @@ fn scale_svg(bytes: &[u8]) -> Result<Vec<u8>> {
                 scaled.push_attribute(("height", "700"));
                 writer
                     .write_event(XmlEvent::Start(scaled))
+                    .context("failed to write scaled SVG")?;
+            }
+            XmlEvent::Start(event) if root_seen => {
+                validate_svg_element(&event)?;
+                writer
+                    .write_event(XmlEvent::Start(event))
+                    .context("failed to write scaled SVG")?;
+            }
+            XmlEvent::Empty(event) => {
+                validate_svg_element(&event)?;
+                writer
+                    .write_event(XmlEvent::Empty(event))
                     .context("failed to write scaled SVG")?;
             }
             XmlEvent::DocType(_) => bail!("SVG document types are not supported"),

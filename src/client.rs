@@ -4,7 +4,9 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use percent_encoding::percent_decode_str;
 use reqwest::blocking::{Client, RequestBuilder};
-use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE, LOCATION, USER_AGENT};
+use reqwest::header::{
+    ACCEPT, ACCEPT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, LOCATION, USER_AGENT,
+};
 use reqwest::redirect::Policy;
 use url::Url;
 use uuid::Uuid;
@@ -101,7 +103,8 @@ impl KiwixClient {
     /// or an invalid OPDS document.
     pub fn list_books(&self) -> Result<Vec<Book>> {
         let mut url = self.base.clone();
-        url.set_path("/catalog/v2/entries");
+        let base_path = self.base.path().trim_end_matches('/');
+        url.set_path(&format!("{base_path}/catalog/v2/entries"));
         url.query_pairs_mut().append_pair("count", "-1");
         let body = self.get_text(&url, "application/atom+xml;profile=opds-catalog")?;
         parse_catalog(&body).context("failed to parse Kiwix catalog")
@@ -340,7 +343,8 @@ impl KiwixClient {
             .http
             .get(url.clone())
             .header(USER_AGENT, concat!("kiwix-cli/", env!("CARGO_PKG_VERSION")))
-            .header(ACCEPT, accept);
+            .header(ACCEPT, accept)
+            .header(ACCEPT_ENCODING, "identity");
         request = self.authenticate(request);
         let mut response = request
             .send()

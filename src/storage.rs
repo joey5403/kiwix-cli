@@ -16,6 +16,7 @@ use crate::model::Book;
 const SCHEMA_VERSION: u32 = 1;
 const MAX_HISTORY_PER_SERVER: usize = 500;
 const MAX_STATE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_FIELD_CHARS: usize = 8 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SavedArticle {
@@ -110,6 +111,8 @@ impl ReadingStore {
                     );
                 }
                 data.version = SCHEMA_VERSION;
+                validate_articles(&mut data.history);
+                validate_articles(&mut data.favorites);
                 trim_history(&mut data.history);
                 data
             }
@@ -328,6 +331,21 @@ impl Drop for ReadingStore {
 
 fn format_error(error: anyhow::Error) -> String {
     format!("{error:#}")
+}
+
+fn validate_articles(articles: &mut Vec<SavedArticle>) {
+    articles.retain(|article| {
+        article.server.len() <= MAX_FIELD_CHARS
+            && article.book_id.len() <= MAX_FIELD_CHARS
+            && article.content_id.len() <= MAX_FIELD_CHARS
+            && article.book_title.len() <= MAX_FIELD_CHARS
+            && article.title.len() <= MAX_FIELD_CHARS
+            && article.locator.len() <= MAX_FIELD_CHARS
+            && url::Url::parse(&article.server).is_ok_and(|url| {
+                matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+            })
+            && article.locator.starts_with('/')
+    });
 }
 
 fn trim_history(history: &mut Vec<SavedArticle>) {

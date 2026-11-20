@@ -30,8 +30,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
-      - name: Install Rust target
-        run: rustup target add "${{ matrix.target }}"
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install 1.100.0 --profile minimal
+          rustup target add "${{ matrix.target }}" --toolchain 1.100.0
       - name: Build release package
         env:
           PLATFORM: ${{ matrix.platform }}
