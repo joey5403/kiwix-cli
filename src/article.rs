@@ -6,7 +6,7 @@ use html2text::render::{RichAnnotation, TaggedLineElement};
 use percent_encoding::percent_decode_str;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionKind {
@@ -34,6 +34,14 @@ pub struct VisibleAction {
     pub action: usize,
     pub line: usize,
     pub column: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WordPosition {
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -140,21 +148,75 @@ impl ArticleDocument {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub fn lines(&self, selected_action: Option<usize>) -> Vec<Line<'static>> {
+        self.lines_with_word(selected_action, None)
+    }
+
+    #[must_use]
+    pub fn lines_with_word(
+        &self,
+        selected_action: Option<usize>,
+        selected_word: Option<&WordPosition>,
+    ) -> Vec<Line<'static>> {
         self.lines
             .iter()
-            .map(|line| {
+            .enumerate()
+            .map(|(line_index, line)| {
+                let mut column: usize = 0;
                 Line::from(
                     line.spans
                         .iter()
-                        .map(|span| {
-                            let style =
-                                if selected_action.is_some() && span.action == selected_action {
+                        .flat_map(|span| {
+                            let width = UnicodeWidthStr::width(span.text.as_str());
+                            let selected_action =
+                                selected_action.is_some() && span.action == selected_action;
+                            let word = selected_word.filter(|word| word.line == line_index);
+                            let Some(word) = word else {
+                                column = column.saturating_add(width);
+                                return vec![Span::styled(
+                                    span.text.clone(),
+                                    if selected_action {
+                                        span.style.add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                                    } else {
+                                        span.style
+                                    },
+                                )];
+                            };
+                            let mut pieces = Vec::new();
+                            let mut segment = String::new();
+                            let mut segment_selected = None;
+                            for character in span.text.chars() {
+                                let character_width =
+                                    UnicodeWidthChar::width(character).unwrap_or(0);
+                                let word_selected = if character_width == 0 {
+                                    word.start <= column && column <= word.end
+                                } else {
+                                    column < word.end
+                                        && word.start < column.saturating_add(character_width)
+                                };
+                                let selected = selected_action || word_selected;
+                                if segment_selected.is_some_and(|current| current != selected) {
+                                    let style = if segment_selected == Some(true) {
+                                        span.style.add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                                    } else {
+                                        span.style
+                                    };
+                                    pieces.push(Span::styled(std::mem::take(&mut segment), style));
+                                }
+                                segment_selected = Some(selected);
+                                segment.push(character);
+                                column = column.saturating_add(character_width);
+                            }
+                            if !segment.is_empty() {
+                                let style = if segment_selected == Some(true) {
                                     span.style.add_modifier(Modifier::BOLD | Modifier::REVERSED)
                                 } else {
                                     span.style
                                 };
-                            Span::styled(span.text.clone(), style)
+                                pieces.push(Span::styled(segment, style));
+                            }
+                            pieces
                         })
                         .collect::<Vec<_>>(),
                 )
@@ -175,6 +237,71 @@ impl ArticleDocument {
                 .iter()
                 .any(|hit| hit.line == line && (hit.start..hit.end).contains(&column))
         })
+    }
+
+    #[must_use]
+    pub fn word_positions(&self, line: usize) -> Vec<WordPosition> {
+        let Some(document_line) = self.lines.get(line) else {
+            return Vec::new();
+        };
+        let mut characters = Vec::new();
+        let mut column: usize = 0;
+        for span in &document_line.spans {
+            for character in span.text.chars() {
+                let width = UnicodeWidthChar::width(character).unwrap_or(0);
+                characters.push((character, column, column.saturating_add(width)));
+                column = column.saturating_add(width);
+            }
+        }
+
+        let mut words = Vec::new();
+        let mut index = 0;
+        while index < characters.len() {
+            let character = characters[index].0;
+            if is_han(character) {
+                let (_, start, _) = characters[index];
+                let end = characters[index].2;
+                words.push(WordPosition {
+                    line,
+                    start,
+                    end,
+                    text: character.to_string(),
+                });
+                index += 1;
+                continue;
+            }
+            if !is_word_character(&characters, index) {
+                index += 1;
+                continue;
+            }
+
+            let start_index = index;
+            index += 1;
+            while index < characters.len()
+                && !is_han(characters[index].0)
+                && is_word_character(&characters, index)
+            {
+                index += 1;
+            }
+            let text = characters[start_index..index]
+                .iter()
+                .map(|(character, _, _)| character)
+                .collect();
+            words.push(WordPosition {
+                line,
+                start: characters[start_index].1,
+                end: characters[index - 1].2,
+                text,
+            });
+        }
+        words
+    }
+
+    #[must_use]
+    pub fn word_at(&self, line: usize, column: usize) -> Option<WordPosition> {
+        self.word_positions(line)
+            .into_iter()
+            .find(|word| (word.start..word.end).contains(&column))
     }
 
     #[must_use]
@@ -216,6 +343,36 @@ impl ArticleDocument {
     pub fn line_count(&self) -> usize {
         self.lines.len()
     }
+}
+
+fn is_word_character(characters: &[(char, usize, usize)], index: usize) -> bool {
+    let character = characters[index].0;
+    character.is_alphanumeric()
+        || is_combining_mark(character)
+        || character == '_'
+        || (matches!(character, '\'' | '’')
+            && index > 0
+            && index + 1 < characters.len()
+            && characters[index - 1].0.is_alphanumeric()
+            && characters[index + 1].0.is_alphanumeric())
+}
+
+fn is_combining_mark(character: char) -> bool {
+    matches!(
+        u32::from(character),
+        0x0300..=0x036f | 0x1ab0..=0x1aff | 0x1dc0..=0x1dff | 0x20d0..=0x20ff | 0xfe20..=0xfe2f
+    )
+}
+
+fn is_han(character: char) -> bool {
+    matches!(
+        u32::from(character),
+        0x3400..=0x4dbf
+            | 0x4e00..=0x9fff
+            | 0xf900..=0xfaff
+            | 0x20000..=0x2fa1f
+            | 0x30000..=0x323af
+    )
 }
 
 fn semantic_action(annotations: &[RichAnnotation]) -> Option<(ActionKind, &str)> {
@@ -312,6 +469,41 @@ mod tests {
         let action_line = document.action_line(0).unwrap();
         assert_eq!(document.action_at(action_line, 2), Some(0));
         assert_eq!(document.action_at(action_line, 6), None);
+    }
+
+    #[test]
+    fn word_hit_testing_uses_display_columns_and_unicode_words() {
+        let document =
+            ArticleDocument::from_html("<p>Hi 中，don't stop! cafe\u{301}</p>", 60).unwrap();
+        let words = document.word_positions(0);
+        let text = words
+            .iter()
+            .map(|word| word.text.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(text.contains(&"Hi"));
+        assert!(text.contains(&"中"));
+        assert!(text.contains(&"don't"));
+        assert!(text.contains(&"stop"));
+        assert!(text.contains(&"cafe\u{301}"));
+        let chinese = words.iter().find(|word| word.text == "中").unwrap();
+        assert_eq!(document.word_at(0, chinese.start), Some(chinese.clone()));
+    }
+
+    #[test]
+    fn selected_word_highlights_only_the_word_inside_a_sentence_span() {
+        let document = ArticleDocument::from_html("<p>one two three</p>", 60).unwrap();
+        let selected = document.word_at(0, 5).unwrap();
+        let highlighted = document.lines_with_word(None, Some(&selected));
+        let selected_text = highlighted[0]
+            .spans
+            .iter()
+            .filter(|span| span.style.add_modifier.contains(Modifier::REVERSED))
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(selected.text, "two");
+        assert_eq!(selected_text, "two");
     }
 
     #[test]

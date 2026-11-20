@@ -24,14 +24,16 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use ratatui::{DefaultTerminal, Frame};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::article::{ActionKind, ArticleDocument};
+use crate::article::{ActionKind, ArticleDocument, WordPosition};
 use crate::client::{ArticleReference, ImageResource, KiwixClient};
+use crate::dictionary::{DictionaryDefinition, DictionaryService};
 use crate::model::{Book, SearchPage, SearchResult};
 use crate::storage::{ReadingStore, SavedArticle};
 
 const EVENT_TICK: Duration = Duration::from_millis(100);
 const SEARCH_PAGE_LENGTH: usize = 20;
 const MAX_QUERY_CHARS: usize = 512;
+const MAX_DICTIONARY_QUERY_CHARS: usize = 256;
 const MAX_ARTICLE_HISTORY: usize = 64;
 const BACKGROUND_WORKERS: usize = 4;
 const BACKGROUND_QUEUE: usize = 8;
@@ -185,6 +187,11 @@ enum WorkerMessage {
         generation: u64,
         result: Result<String, String>,
     },
+    Dictionary {
+        generation: u64,
+        request: u64,
+        result: Result<Vec<DictionaryDefinition>, String>,
+    },
 }
 
 /// Runs the interactive terminal reader until the user exits.
@@ -193,7 +200,7 @@ enum WorkerMessage {
 ///
 /// Returns an error outside a terminal or when terminal initialization, event handling, or
 /// rendering fails.
-pub fn run_tui(client: KiwixClient) -> Result<()> {
+pub fn run_tui(client: KiwixClient, dictionaries: DictionaryService) -> Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         bail!("interactive mode requires a terminal; use books, search, or read in scripts");
     }
@@ -204,7 +211,7 @@ pub fn run_tui(client: KiwixClient) -> Result<()> {
     reading
         .enable_async_persistence()
         .context("failed to start reading data writer")?;
-    let mut app = App::new(client, reading)?;
+    let mut app = App::new(client, reading, dictionaries)?;
     app.load_libraries();
     let run_result = ratatui::run(|terminal| {
         execute!(stdout(), EnableMouseCapture).context("failed to enable mouse capture")?;
@@ -236,6 +243,7 @@ struct ArticleSnapshot {
     render_width: u16,
     scroll: u16,
     selected_action: Option<usize>,
+    selected_word: Option<WordPosition>,
 }
 
 #[derive(Debug, Clone)]
@@ -254,6 +262,7 @@ struct HintState {
 
 struct App {
     client: KiwixClient,
+    dictionaries: DictionaryService,
     tx: Sender<WorkerMessage>,
     rx: Receiver<WorkerMessage>,
     workers: WorkerPool,
@@ -286,6 +295,15 @@ struct App {
     article_view_height: u16,
     article_content_area: Rect,
     article_selected_action: Option<usize>,
+    article_selected_word: Option<WordPosition>,
+    word_mode: bool,
+    dictionary_open: bool,
+    dictionary_query: String,
+    dictionary_entries: Vec<DictionaryDefinition>,
+    dictionary_loading: bool,
+    dictionary_error: Option<String>,
+    dictionary_request: u64,
+    dictionary_scroll: u16,
     article_pending_fragment: Option<String>,
     article_history: VecDeque<ArticleSnapshot>,
     hint_state: Option<HintState>,
@@ -293,11 +311,16 @@ struct App {
 }
 
 impl App {
-    fn new(client: KiwixClient, reading: ReadingStore) -> Result<Self> {
+    fn new(
+        client: KiwixClient,
+        reading: ReadingStore,
+        dictionaries: DictionaryService,
+    ) -> Result<Self> {
         let (tx, rx) = mpsc::channel();
         let workers = WorkerPool::new()?;
         Ok(Self {
             client,
+            dictionaries,
             tx,
             rx,
             workers,
@@ -330,6 +353,15 @@ impl App {
             article_view_height: 1,
             article_content_area: Rect::ZERO,
             article_selected_action: None,
+            article_selected_word: None,
+            word_mode: false,
+            dictionary_open: false,
+            dictionary_query: String::new(),
+            dictionary_entries: Vec::new(),
+            dictionary_loading: false,
+            dictionary_error: None,
+            dictionary_request: 0,
+            dictionary_scroll: 0,
             article_pending_fragment: None,
             article_history: VecDeque::new(),
             hint_state: None,
@@ -359,6 +391,10 @@ impl App {
                         self.append_query(&value);
                         needs_draw = true;
                     }
+                    Event::Paste(value) if self.dictionary_open => {
+                        self.append_dictionary_query(&value);
+                        needs_draw = true;
+                    }
                     Event::Resize(_, _) => {
                         self.hint_state = None;
                         needs_draw = true;
@@ -377,6 +413,10 @@ impl App {
     fn handle_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.should_quit = true;
+            return;
+        }
+        if self.dictionary_open {
+            self.handle_dictionary_key(key);
             return;
         }
         if self.hint_state.is_some() {
@@ -428,11 +468,11 @@ impl App {
             KeyCode::Char(character)
                 if !key
                     .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                    && self.search_draft.chars().count() < MAX_QUERY_CHARS
+                    && !character.is_control() =>
             {
-                if self.search_draft.chars().count() < MAX_QUERY_CHARS && !character.is_control() {
-                    self.search_draft.push(character);
-                }
+                self.search_draft.push(character);
             }
             _ => {}
         }
@@ -643,11 +683,24 @@ impl App {
     }
 
     fn handle_article_key(&mut self, key: KeyCode) {
+        if self.word_mode {
+            match key {
+                KeyCode::Esc => self.word_mode = false,
+                KeyCode::Left | KeyCode::Char('h') => self.move_word(false),
+                KeyCode::Right | KeyCode::Char('l') => self.move_word(true),
+                KeyCode::Up | KeyCode::Char('k') => self.move_word_vertical(false),
+                KeyCode::Down | KeyCode::Char('j') => self.move_word_vertical(true),
+                KeyCode::Enter => self.open_dictionary_for_selection(),
+                _ => {}
+            }
+            return;
+        }
         match key {
             KeyCode::Tab => self.select_article_action(true),
             KeyCode::BackTab => self.select_article_action(false),
             KeyCode::Enter | KeyCode::Char('l') => self.activate_selected_action(),
             KeyCode::Char('f') => self.open_hint_mode(),
+            KeyCode::Char('w') => self.start_word_mode(),
             KeyCode::Char('j') | KeyCode::Down => self.scroll_article(1),
             KeyCode::Char('k') | KeyCode::Up => self.scroll_article(-1),
             KeyCode::PageDown | KeyCode::Char(' ') => {
@@ -663,6 +716,194 @@ impl App {
             KeyCode::Char('R') => self.load_random_article(),
             KeyCode::Char('h' | 'q') | KeyCode::Esc => self.go_back(),
             _ => {}
+        }
+    }
+
+    fn start_word_mode(&mut self) {
+        if self.article_document.is_none() {
+            return;
+        }
+        if self.article_selected_word.is_none() {
+            let first = (usize::from(self.article_scroll)
+                ..usize::from(self.article_scroll.saturating_add(self.article_view_height)))
+                .find_map(|line| {
+                    self.article_document
+                        .as_ref()?
+                        .word_positions(line)
+                        .into_iter()
+                        .next()
+                });
+            self.article_selected_word = first;
+        }
+        if let Some(word) = &self.article_selected_word {
+            self.word_mode = true;
+            self.ensure_article_line_visible(word.line);
+            self.notice =
+                Some("Word mode: arrows or h/j/k/l move; Enter lookup; Esc cancel".to_owned());
+        } else {
+            self.notice = Some("No word is visible".to_owned());
+        }
+    }
+
+    fn move_word(&mut self, forward: bool) {
+        let Some(document) = &self.article_document else {
+            return;
+        };
+        let current = self.article_selected_word.clone();
+        let neighbor = if forward {
+            let start_line = current
+                .as_ref()
+                .map_or(usize::from(self.article_scroll), |word| word.line);
+            (start_line..document.line_count()).find_map(|line| {
+                document.word_positions(line).into_iter().find(|word| {
+                    current.as_ref().is_none_or(|current| {
+                        (word.line, word.start) > (current.line, current.start)
+                    })
+                })
+            })
+        } else {
+            let start_line = current
+                .as_ref()
+                .map_or(usize::from(self.article_scroll), |word| word.line)
+                .min(document.line_count().saturating_sub(1));
+            (0..=start_line).rev().find_map(|line| {
+                document
+                    .word_positions(line)
+                    .into_iter()
+                    .rev()
+                    .find(|word| {
+                        current.as_ref().is_none_or(|current| {
+                            (word.line, word.start) < (current.line, current.start)
+                        })
+                    })
+            })
+        };
+        if let Some(word) = neighbor {
+            self.ensure_article_line_visible(word.line);
+            self.article_selected_word = Some(word);
+        }
+    }
+
+    fn move_word_vertical(&mut self, down: bool) {
+        let Some(document) = &self.article_document else {
+            return;
+        };
+        let Some(current) = self.article_selected_word.as_ref() else {
+            return;
+        };
+        let target_lines: Box<dyn Iterator<Item = usize>> = if down {
+            Box::new(current.line.saturating_add(1)..document.line_count())
+        } else {
+            Box::new((0..current.line).rev())
+        };
+        let target = target_lines
+            .filter_map(|line| {
+                document
+                    .word_positions(line)
+                    .into_iter()
+                    .min_by_key(|word| word.start.abs_diff(current.start))
+            })
+            .next();
+        if let Some(word) = target {
+            self.ensure_article_line_visible(word.line);
+            self.article_selected_word = Some(word);
+        }
+    }
+
+    fn open_dictionary_for_selection(&mut self) {
+        let Some(word) = self.article_selected_word.clone() else {
+            self.start_word_mode();
+            return;
+        };
+        self.word_mode = false;
+        self.dictionary_open = true;
+        self.dictionary_query = word.text;
+        self.dictionary_entries.clear();
+        self.dictionary_error = None;
+        self.dictionary_scroll = 0;
+        self.start_dictionary_lookup();
+    }
+
+    fn handle_dictionary_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.dictionary_open = false;
+                self.word_mode = false;
+            }
+            KeyCode::Enter => self.start_dictionary_lookup(),
+            KeyCode::Backspace => {
+                self.dictionary_query.pop();
+                self.reset_dictionary_results();
+            }
+            KeyCode::Up | KeyCode::PageUp => {
+                self.dictionary_scroll = self.dictionary_scroll.saturating_sub(3);
+            }
+            KeyCode::Down | KeyCode::PageDown => {
+                self.dictionary_scroll = self.dictionary_scroll.saturating_add(3);
+            }
+            KeyCode::Char(character)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                    && !character.is_control()
+                    && self.dictionary_query.chars().count() < MAX_DICTIONARY_QUERY_CHARS =>
+            {
+                self.dictionary_query.push(character);
+                self.reset_dictionary_results();
+            }
+            _ => {}
+        }
+    }
+
+    fn append_dictionary_query(&mut self, value: &str) {
+        for character in value.chars().filter(|character| !character.is_control()) {
+            if self.dictionary_query.chars().count() >= MAX_DICTIONARY_QUERY_CHARS {
+                break;
+            }
+            self.dictionary_query.push(character);
+        }
+        self.reset_dictionary_results();
+    }
+
+    fn reset_dictionary_results(&mut self) {
+        self.dictionary_request = self.dictionary_request.wrapping_add(1);
+        self.dictionary_entries.clear();
+        self.dictionary_loading = false;
+        self.dictionary_error = None;
+        self.dictionary_scroll = 0;
+    }
+
+    fn start_dictionary_lookup(&mut self) {
+        let query = self.dictionary_query.trim().to_owned();
+        if query.is_empty() {
+            self.dictionary_error = Some("Enter a word to look up".to_owned());
+            self.dictionary_loading = false;
+            return;
+        }
+        self.dictionary_query = query.clone();
+        self.dictionary_request = self.dictionary_request.wrapping_add(1);
+        self.dictionary_loading = true;
+        self.dictionary_entries.clear();
+        self.dictionary_error = None;
+        self.dictionary_scroll = 0;
+        let request = self.dictionary_request;
+        let generation = self.generation;
+        let dictionary = self.dictionaries.clone();
+        let tx = self.tx.clone();
+        let submit = self.workers.submit(
+            generation,
+            Box::new(move || {
+                let result = dictionary.lookup(&query).map_err(format_error);
+                let _ = tx.send(WorkerMessage::Dictionary {
+                    generation,
+                    request,
+                    result,
+                });
+            }),
+        );
+        if let Err(error) = submit {
+            self.dictionary_loading = false;
+            self.dictionary_error = Some(error);
         }
     }
 
@@ -752,6 +993,7 @@ impl App {
     fn handle_mouse(&mut self, mouse: MouseEvent) {
         if self.search_open
             || self.help_open
+            || self.dictionary_open
             || self.hint_state.is_some()
             || self.view != View::Article
         {
@@ -772,13 +1014,16 @@ impl App {
                 let line = usize::from(self.article_scroll)
                     + usize::from(mouse.row.saturating_sub(area.y));
                 let column = usize::from(mouse.column.saturating_sub(area.x));
-                if let Some(action) = self
-                    .article_document
-                    .as_ref()
-                    .and_then(|document| document.action_at(line, column))
+                let document = self.article_document.as_ref();
+                if let Some(action) = document.and_then(|document| document.action_at(line, column))
                 {
                     self.article_selected_action = Some(action);
                     self.activate_article_action(action);
+                } else if let Some(word) =
+                    document.and_then(|document| document.word_at(line, column))
+                {
+                    self.article_selected_word = Some(word);
+                    self.open_dictionary_for_selection();
                 }
             }
             _ => {}
@@ -1025,6 +1270,9 @@ impl App {
         self.article_scroll = 0;
         self.article_render_width = 0;
         self.article_selected_action = None;
+        self.article_selected_word = None;
+        self.word_mode = false;
+        self.dictionary_open = false;
         self.article_pending_fragment.clone_from(&fragment);
         let generation = self.begin_load(Loading::Article);
         let client = self.client.clone();
@@ -1083,6 +1331,9 @@ impl App {
         self.article_scroll = 0;
         self.article_render_width = 0;
         self.article_selected_action = None;
+        self.article_selected_word = None;
+        self.word_mode = false;
+        self.dictionary_open = false;
         self.article_pending_fragment = None;
         let generation = self.begin_load(landing.loading());
         let client = self.client.clone();
@@ -1253,6 +1504,20 @@ impl App {
                         Err(error) => self.error = Some(error),
                     }
                 }
+                WorkerMessage::Dictionary {
+                    generation,
+                    request,
+                    result,
+                } if generation == self.generation
+                    && request == self.dictionary_request
+                    && self.dictionary_open =>
+                {
+                    self.dictionary_loading = false;
+                    match result {
+                        Ok(entries) => self.dictionary_entries = entries,
+                        Err(error) => self.dictionary_error = Some(error),
+                    }
+                }
                 _ => {}
             }
         }
@@ -1291,6 +1556,7 @@ impl App {
             render_width: self.article_render_width,
             scroll: self.article_scroll,
             selected_action: self.article_selected_action,
+            selected_word: self.article_selected_word.clone(),
         });
     }
 
@@ -1308,6 +1574,8 @@ impl App {
         self.article_render_width = snapshot.render_width;
         self.article_scroll = snapshot.scroll;
         self.article_selected_action = snapshot.selected_action;
+        self.article_selected_word = snapshot.selected_word;
+        self.word_mode = false;
         self.article_pending_fragment = None;
     }
 
@@ -1340,6 +1608,8 @@ impl App {
             Ok(document) => {
                 self.article_document = Some(document);
                 self.article_render_width = width;
+                self.article_selected_word = None;
+                self.word_mode = false;
                 if let Some(fragment) = self.article_pending_fragment.take() {
                     self.jump_to_fragment(&fragment);
                 }
@@ -1424,6 +1694,9 @@ impl App {
         }
         if self.search_open {
             self.render_search(frame, area);
+        }
+        if self.dictionary_open {
+            self.render_dictionary(frame, area);
         }
     }
 
@@ -1595,8 +1868,11 @@ impl App {
         frame.render_widget(block, area);
         if let Some(document) = &self.article_document {
             frame.render_widget(
-                Paragraph::new(document.lines(self.article_selected_action))
-                    .scroll((self.article_scroll, 0)),
+                Paragraph::new(document.lines_with_word(
+                    self.article_selected_action,
+                    self.article_selected_word.as_ref(),
+                ))
+                .scroll((self.article_scroll, 0)),
                 inner,
             );
         } else {
@@ -1652,10 +1928,22 @@ impl App {
             View::Results => "j/k move   Enter read   H history   B favorites   n/p page",
             View::History => "j/k move   Enter read   d delete   B favorites   h back",
             View::Favorites => "j/k move   Enter read   d delete   H history   h back",
-            View::Article => "j/k scroll   f hints   F favorite   H history   B favorites",
+            View::Article => {
+                "j/k scroll   w word lookup   f hints   F favorite   H history   B favorites"
+            }
         };
         let context = if let Some(hints) = &self.hint_state {
             format!("Hint: {}  Esc cancel", hints.typed)
+        } else if self.word_mode {
+            self.article_selected_word.as_ref().map_or_else(
+                || "Word mode: arrows or h/j/k/l move; Enter lookup; Esc cancel".to_owned(),
+                |word| {
+                    format!(
+                        "Word: {}  arrows or h/j/k/l move; Enter lookup; Esc cancel",
+                        word.text
+                    )
+                },
+            )
         } else if self.view == View::Article {
             self.article_selected_action
                 .and_then(|selected| self.article_document.as_ref()?.actions().get(selected))
@@ -1696,6 +1984,8 @@ impl App {
             Line::from("Tab / Shift-Tab   Select article link or image"),
             Line::from("f                 Show hints for visible links and images"),
             Line::from("Enter / click     Open selected article action"),
+            Line::from("w                 Select a word; arrows move; Enter looks it up"),
+            Line::from("Click a word      Look up the word under the pointer"),
             Line::from("Space / b         Page down / page up"),
             Line::from("h / q / Escape    Back"),
             Line::from("Ctrl-C            Quit"),
@@ -1733,6 +2023,81 @@ impl App {
                 .unwrap_or(u16::MAX);
         let cursor_x = popup.x.saturating_add(1).saturating_add(visible_width);
         frame.set_cursor_position((cursor_x, popup.y.saturating_add(1)));
+    }
+
+    fn render_dictionary(&self, frame: &mut Frame, area: Rect) {
+        let popup_height = area.height.saturating_sub(4).max(5);
+        let popup = centered_rect(area, 84, popup_height);
+        frame.render_widget(Clear, popup);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Dictionary lookup · local MDX ");
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        let input = Paragraph::new(self.dictionary_query.as_str())
+            .block(Block::default().borders(Borders::ALL).title(" Word "));
+        frame.render_widget(input, rows[0]);
+
+        let lines = if self.dictionary_loading {
+            vec![Line::from(Span::styled(
+                "Looking up local dictionary…",
+                Style::default().fg(EMPHASIS),
+            ))]
+        } else if let Some(error) = &self.dictionary_error {
+            vec![Line::from(Span::styled(
+                error.clone(),
+                Style::default().fg(FAILURE),
+            ))]
+        } else if self.dictionary_entries.is_empty() {
+            vec![Line::from(if self.dictionary_query.is_empty() {
+                "Type a word and press Enter"
+            } else {
+                "No matching entry"
+            })]
+        } else {
+            let mut lines = Vec::new();
+            for entry in &self.dictionary_entries {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        entry.headword.clone(),
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("  {}", entry.dictionary),
+                        Style::default().fg(MUTED),
+                    ),
+                ]));
+                lines.extend(entry.text.lines().map(|line| Line::from(line.to_owned())));
+                lines.push(Line::from(""));
+            }
+            lines
+        };
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).scroll((self.dictionary_scroll, 0)),
+            rows[1],
+        );
+        frame.render_widget(
+            Paragraph::new("Enter lookup   Type to edit   ↑/↓ scroll   Esc close")
+                .style(Style::default().fg(MUTED)),
+            rows[2],
+        );
+        let query_width = usize::from(rows[0].width.saturating_sub(4));
+        let visible = visible_tail(&self.dictionary_query, query_width);
+        let cursor_width = u16::try_from(UnicodeWidthStr::width(visible.as_str()).min(query_width))
+            .unwrap_or(u16::MAX);
+        frame.set_cursor_position((
+            rows[0].x.saturating_add(1).saturating_add(cursor_width),
+            rows[0].y.saturating_add(1),
+        ));
     }
 }
 
@@ -1927,6 +2292,12 @@ mod tests {
             )
             .unwrap(),
             ReadingStore::in_memory(),
+            DictionaryService::mdx(
+                Path::new("/nonexistent/kiwix-cli-test-dictionaries").to_path_buf(),
+                None,
+                "en".to_owned(),
+            )
+            .unwrap(),
         )
         .unwrap()
     }
@@ -2082,6 +2453,36 @@ mod tests {
     }
 
     #[test]
+    fn dictionary_popup_renders_local_definition_on_narrow_terminal() {
+        let mut app = app();
+        app.view = View::Article;
+        app.article_title = "Dictionary test".to_owned();
+        app.article_document = Some(ArticleDocument::from_html("<p>apple</p>", 60).unwrap());
+        app.dictionary_open = true;
+        app.dictionary_query = "apple".to_owned();
+        app.dictionary_entries.push(DictionaryDefinition {
+            headword: "apple".to_owned(),
+            dictionary: "English Dictionary".to_owned(),
+            text: "A fruit.".to_owned(),
+        });
+        let backend = TestBackend::new(42, 14);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| app.render(frame)).unwrap();
+
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(screen.contains("Dictionary lookup"));
+        assert!(screen.contains("apple"));
+        assert!(screen.contains("A fruit."));
+    }
+
+    #[test]
     fn library_enter_opens_home_while_slash_opens_search() {
         let mut home_app = app();
         home_app.libraries.push(Book {
@@ -2121,6 +2522,49 @@ mod tests {
         assert_eq!(app.view, View::Results);
         assert_eq!(app.loading, None);
         assert_eq!(app.generation, 5);
+    }
+
+    #[test]
+    fn keyboard_word_selection_opens_dictionary_lookup_for_the_selected_word() {
+        let mut app = app();
+        app.view = View::Article;
+        app.article_document =
+            Some(ArticleDocument::from_html("<p>apple orange</p><p>cat dog</p>", 60).unwrap());
+        app.article_view_height = 5;
+
+        app.handle_article_key(KeyCode::Char('w'));
+        assert_eq!(
+            app.article_selected_word
+                .as_ref()
+                .map(|word| word.text.as_str()),
+            Some("apple")
+        );
+        app.handle_article_key(KeyCode::Right);
+        assert_eq!(
+            app.article_selected_word
+                .as_ref()
+                .map(|word| word.text.as_str()),
+            Some("orange")
+        );
+        app.handle_article_key(KeyCode::Down);
+        assert_eq!(
+            app.article_selected_word
+                .as_ref()
+                .map(|word| word.text.as_str()),
+            Some("dog")
+        );
+        app.handle_article_key(KeyCode::Up);
+        assert_eq!(
+            app.article_selected_word
+                .as_ref()
+                .map(|word| word.text.as_str()),
+            Some("orange")
+        );
+        app.handle_article_key(KeyCode::Enter);
+
+        assert!(app.dictionary_open);
+        assert_eq!(app.dictionary_query, "orange");
+        assert!(!app.word_mode);
     }
 
     #[test]

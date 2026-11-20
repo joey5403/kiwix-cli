@@ -16,7 +16,7 @@
 
 - 一个可访问的 Kiwix 服务
 - 交互模式需要真实终端
-- 从源码构建需要 Rust 1.88 或更高版本
+- 从源码构建需要 Rust 1.97 或更高版本
 - 查看图片需要系统文件打开器，例如 Linux 下的 `xdg-open` 或 macOS 下的 `open`
 
 ### 安装
@@ -36,7 +36,7 @@ paru -S kiwix-cli-bin
 下载并安装当前 Linux `x86_64` Release：
 
 ```bash
-VERSION=0.2.1
+VERSION=0.3.0
 ARCHIVE="kiwix-cli-${VERSION}-linux-x86_64.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
 
@@ -55,7 +55,7 @@ install -Dm644 "kiwix-cli-${VERSION}-linux-x86_64/man/man1/kiwix-cli.1" "$HOME/.
 Release 分别提供 Apple Silicon（`arm64`）和 Intel（`x86_64`）压缩包。下面的命令会自动选择当前架构：
 
 ```bash
-VERSION=0.2.1
+VERSION=0.3.0
 ARCH="$(uname -m)"
 ARCHIVE="kiwix-cli-${VERSION}-macos-${ARCH}.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
@@ -170,6 +170,8 @@ kiwix-cli
 | `d` | 删除选中的历史或收藏条目 |
 | `Tab` / `Shift-Tab` | 选择下一个/上一个文章链接或图片 |
 | `f` | 为当前可见的链接和图片显示 Vimium 风格 Hint |
+| `w` | 进入单词选择模式，用方向键或 `h`/`j`/`k`/`l` 移动，按 `Enter` 查词 |
+| 鼠标点击普通单词 | 打开本地词典词条；点击链接仍会正常跳转 |
 | 鼠标左键 | 打开指针下的链接或图片 |
 | 鼠标滚轮 | 滚动文章 |
 | `h` / `q` / `Esc` | 返回；在文库列表按 `q` 退出 |
@@ -181,6 +183,10 @@ kiwix-cli
 成功加载的文章会自动写入持久化浏览历史。历史和收藏在不同文库之间使用统一列表，但每条记录仍保留来源文库和规范化后的服务器地址；界面只显示当前服务器的记录。数据位于系统应用数据目录（Linux 默认为 `~/.local/share/kiwix-cli/reading.json`），可用 `KIWIX_CLI_DATA_DIR` 覆盖其父目录。
 
 在文章中按 `f`，当前视口内的链接和图片会显示黄色短标签。输入标签即可打开目标，使用 `Backspace` 修正输入，或按 `Esc` 取消。
+
+本地 `.mdx` 词典默认从用户主目录下的 `~/.kiwix-cli/dictionaries` 读取。请自行放入有合法使用授权的词典文件，并按 `<源语言>-<目标语言>.mdx` 命名，例如 `en-en.mdx` 或 `zh-en.mdx`。英文单词会自动使用 `en-en`；其他文字脚本使用配置的目标语言，默认英语。查词面板允许编辑查询词，适用于需要输入完整多字中文词的情况。
+
+可用 `--dictionary-dir` 或 `KIWIX_CLI_DICTIONARY_DIR` 修改目录。遇到非英语的拉丁字母词，可设置 `--dictionary-source-language` 或 `KIWIX_CLI_DICTIONARY_SOURCE_LANGUAGE`；非英语源词典的目标语言可通过 `--dictionary-target-language` 或 `KIWIX_CLI_DICTIONARY_TARGET_LANGUAGE` 设置。程序不会打包或下载词典文件。
 
 同源图片会先使用当前 Kiwix 凭据下载到会话临时目录，再启动系统图片应用，因此不会把 Basic Auth 密码传递给外部程序。固有尺寸较小的 Wiki 公式 SVG 会保留矢量路径和 `viewBox`，但以 `1400x700` 的显示画布写出。程序退出时会删除临时文件。
 
@@ -232,6 +238,9 @@ kiwix-cli read /content/rust_docs/A/Ownership --width 60
 --server <URL>       Kiwix 服务地址，或 KIWIX_URL；默认使用公共 Browse 服务
 --username <NAME>    Basic Auth 用户名，或 KIWIX_USERNAME
 --timeout <SECONDS>  请求超时，默认 30 秒，范围 1-300；交互模式最高 30 秒
+--dictionary-dir <PATH>  本地 .mdx 词典目录，默认 ~/.kiwix-cli/dictionaries
+--dictionary-source-language <CODE>  覆盖自动检测的源语言
+--dictionary-target-language <CODE>  非英语源词典的目标语言，默认 en
 ```
 
 使用 `kiwix-cli --help` 或 `kiwix-cli <command> --help` 查看完整命令接口。
@@ -240,7 +249,7 @@ kiwix-cli read /content/rust_docs/A/Ownership --width 60
 
 ### 技术栈
 
-- Rust 2024 edition，最低支持 Rust 1.88
+- Rust 2024 edition，最低支持 Rust 1.97
 - Ratatui 和 Crossterm：终端绘制与事件处理
 - Reqwest 和 Rustls：由后台线程执行阻塞式 HTTPS 请求
 - `html2text` rich renderer：结构化 Wiki HTML 渲染

@@ -1,4 +1,4 @@
-.TH KIWIX-CLI 1 "2026-11-20" "kiwix-cli 0.2.1" "User Commands"
+.TH KIWIX-CLI 1 "2026-11-20" "kiwix-cli 0.3.0" "User Commands"
 .SH NAME
 kiwix-cli \- browse Kiwix libraries and articles from a terminal
 .SH SYNOPSIS
@@ -39,6 +39,15 @@ HTTP Basic Auth username. May also be set with \fBKIWIX_USERNAME\fR.
 .BI --timeout " SECONDS"
 Request timeout from 1 to 300 seconds. The default is 30. Interactive mode caps this at 30 seconds.
 .TP
+.BI --dictionary-dir " PATH"
+Directory containing local \fB.mdx\fR dictionaries. Defaults to \fB~/.kiwix-cli/dictionaries\fR under the home directory. May also be set with \fBKIWIX_CLI_DICTIONARY_DIR\fR.
+.TP
+.BI --dictionary-source-language " CODE"
+Override automatic source-language detection. May also be set with BKIWIX_CLI_DICTIONARY_SOURCE_LANGUAGER.
+.TP
+.BI --dictionary-target-language " CODE"
+Target language for non-English source dictionaries. Defaults to BenR and may also be set with BKIWIX_CLI_DICTIONARY_TARGET_LANGUAGER.
+.TP
 .B -h, --help
 Print help.
 .TP
@@ -57,6 +66,15 @@ HTTP Basic Auth password. It is intentionally not accepted as a command-line opt
 .TP
 .B KIWIX_CLI_DATA_DIR
 Directory containing \\fBreading.json\\fR, which stores persistent history and favorites. The platform application data directory is used by default.
+.TP
+.B KIWIX_CLI_DICTIONARY_DIR
+Directory containing local MDX dictionaries. Defaults to \fB~/.kiwix-cli/dictionaries\fR under the user's home directory.
+.TP
+.B KIWIX_CLI_DICTIONARY_SOURCE_LANGUAGE
+Optional source-language override for dictionary selection.
+.TP
+.B KIWIX_CLI_DICTIONARY_TARGET_LANGUAGE
+Target language for non-English source dictionaries. Defaults to en.
 .SH COMMANDS
 .TP
 .B books
@@ -81,6 +99,10 @@ kiwix-cli
 .EE
 .PP
 In the library list, \fBEnter\fR or \fBl\fR opens the selected library home page and \fB/\fR opens search. Article controls are:
+.IP "w" 4
+Select an article word. Use arrows or \fBh\fR/\fBj\fR/\fBk\fR/\fBl\fR to move, \fBEnter\fR to look it up, or Escape to cancel.
+.IP "Mouse click on a word" 4
+Open the word in the local dictionary. Clickable article links retain their normal navigation behavior.
 .IP "j / k, arrows" 4
 Move or scroll.
 .IP "Space / b" 4
@@ -113,6 +135,8 @@ Go back. Press \fBq\fR in the library list to quit.
 Exit and restore the terminal.
 .PP
 Article HTML is rendered with styles for headings, emphasis, code, tables, links, and images. Internal Wiki links keep article history. Images are downloaded with the configured credentials before an external opener is launched. Small formula SVGs are rewritten as a larger vector SVG while retaining their paths and viewBox.
+.PP
+English queries automatically select an Ben-en.mdxR dictionary. Other dictionary pairs use filenames such as Bzh-en.mdxR; place dictionary files in the configured dictionary directory. Dictionary files are not distributed with this program.
 .PP
 Successfully loaded articles are stored in persistent browsing history. History and favorites are unified across books, retain their source book and server, and only show entries belonging to the currently configured server.
 .SH EXAMPLES

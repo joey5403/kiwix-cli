@@ -16,7 +16,7 @@ A keyboard-first Kiwix reader built with Rust, Ratatui, and Crossterm. It connec
 
 - A reachable Kiwix server
 - A terminal for interactive mode
-- Rust 1.88 or newer when building from source
+- Rust 1.97 or newer when building from source
 - A system file opener for images, such as `xdg-open` on Linux or `open` on macOS
 
 ### Install
@@ -36,7 +36,7 @@ paru -S kiwix-cli-bin
 Download and install the current Linux `x86_64` release:
 
 ```bash
-VERSION=0.2.1
+VERSION=0.3.0
 ARCHIVE="kiwix-cli-${VERSION}-linux-x86_64.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
 
@@ -55,7 +55,7 @@ Ensure `$HOME/.local/bin` is on `PATH` before starting `kiwix-cli`.
 The release provides separate archives for Apple Silicon (`arm64`) and Intel (`x86_64`). The command below selects the current architecture automatically:
 
 ```bash
-VERSION=0.2.1
+VERSION=0.3.0
 ARCH="$(uname -m)"
 ARCHIVE="kiwix-cli-${VERSION}-macos-${ARCH}.tar.gz"
 BASE_URL="https://github.com/joey5403/kiwix-cli/releases/download/v${VERSION}"
@@ -170,6 +170,8 @@ Select a library and press `Enter` to open its home page. Press `/` when you wan
 | `d` | Delete the selected history or favorite entry |
 | `Tab` / `Shift-Tab` | Select the next / previous article link or image |
 | `f` | Show Vimium-style hints for visible links and images |
+| `w` | Enter word selection mode; use arrows or `h`/`j`/`k`/`l`, then `Enter` to look up |
+| Mouse click on a word | Open its local dictionary entry; links still open normally |
 | Mouse click | Open a link or image under the pointer |
 | Mouse wheel | Scroll an article |
 | `h` / `q` / `Esc` | Go back; `q` exits from the library list |
@@ -181,6 +183,10 @@ Articles are parsed by the `html2text` rich HTML5 engine. Headings, emphasis, co
 Successfully loaded articles are added to persistent browsing history. History and favorites use one unified list across books, while each entry retains its source book and normalized server address. Only entries for the currently configured server are shown. Data is stored in the platform application data directory (`~/.local/share/kiwix-cli/reading.json` on Linux); set `KIWIX_CLI_DATA_DIR` to override its parent directory.
 
 In an article, press `f` to place short yellow hints over links and images in the current viewport. Type the displayed hint to open its target, use `Backspace` to correct input, or press `Esc` to cancel.
+
+Local `.mdx` dictionaries are read from `~/.kiwix-cli/dictionaries` in the user's home directory by default. Put licensed files there and name language-pair dictionaries as `<source>-<target>.mdx`, for example `en-en.mdx` or `zh-en.mdx`. English words automatically use `en-en`; other scripts use the configured target language, which defaults to English. The lookup panel lets you edit the query before retrying, useful for Chinese words that span multiple characters.
+
+Override the directory with `--dictionary-dir` or `KIWIX_CLI_DICTIONARY_DIR`. Set `--dictionary-source-language` / `KIWIX_CLI_DICTIONARY_SOURCE_LANGUAGE` when a Latin-script word is not English, and `--dictionary-target-language` / `KIWIX_CLI_DICTIONARY_TARGET_LANGUAGE` for non-English source dictionaries. Dictionary files are not bundled or downloaded by the application.
 
 Authenticated images are downloaded to a session-scoped temporary directory before the system image application is launched. Small Wiki formula SVGs retain their vector paths and `viewBox`, but are written with a `1400x700` display canvas for readability. Temporary files are removed when the application exits.
 
@@ -232,6 +238,9 @@ Global options may appear before or after the subcommand:
 --server <URL>       Kiwix server URL, or KIWIX_URL; default public Browse service
 --username <NAME>    Basic Auth username, or KIWIX_USERNAME
 --timeout <SECONDS>  Request timeout, default 30, range 1-300; interactive mode caps it at 30 seconds
+--dictionary-dir <PATH>  Local .mdx directory; default is ~/.kiwix-cli/dictionaries under the user's home
+--dictionary-source-language <CODE>  Override detected lookup language
+--dictionary-target-language <CODE>  Target language for non-English source dictionaries; default en
 ```
 
 Run `kiwix-cli --help` or `kiwix-cli <command> --help` for the complete interface.
@@ -240,7 +249,7 @@ Run `kiwix-cli --help` or `kiwix-cli <command> --help` for the complete interfac
 
 ### Technology
 
-- Rust 2024 edition, minimum supported Rust version 1.88
+- Rust 2024 edition, minimum supported Rust version 1.97
 - Ratatui and Crossterm for terminal rendering and events
 - Reqwest with Rustls for blocking HTTPS requests executed on worker threads
 - `html2text` rich rendering for structured Wiki HTML

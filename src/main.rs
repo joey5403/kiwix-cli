@@ -1,10 +1,12 @@
 use std::env;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use crossterm::terminal;
 use kiwix_cli::client::KiwixClient;
+use kiwix_cli::dictionary::{DictionaryService, default_dictionary_dir};
 use kiwix_cli::tui::run_tui;
 
 const DEFAULT_SERVER: &str = "https://browse.library.kiwix.org/";
@@ -23,6 +25,23 @@ struct Cli {
     /// Request timeout in seconds; interactive mode caps it at 30 seconds
     #[arg(long, default_value_t = 30, global = true, value_parser = clap::value_parser!(u64).range(1..=300))]
     timeout: u64,
+
+    /// Directory containing local .mdx dictionaries (or KIWIX_CLI_DICTIONARY_DIR)
+    #[arg(long, env = "KIWIX_CLI_DICTIONARY_DIR", global = true)]
+    dictionary_dir: Option<PathBuf>,
+
+    /// Source language override for ambiguous Latin-script words
+    #[arg(long, env = "KIWIX_CLI_DICTIONARY_SOURCE_LANGUAGE", global = true)]
+    dictionary_source_language: Option<String>,
+
+    /// Target language for non-English source dictionaries
+    #[arg(
+        long,
+        env = "KIWIX_CLI_DICTIONARY_TARGET_LANGUAGE",
+        default_value = "en",
+        global = true
+    )]
+    dictionary_target_language: String,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -96,7 +115,15 @@ fn main() -> Result<()> {
     )?;
 
     match cli.command {
-        None => run_tui(client)?,
+        None => {
+            let dictionary_dir = default_dictionary_dir(cli.dictionary_dir)?;
+            let dictionaries = DictionaryService::mdx(
+                dictionary_dir,
+                cli.dictionary_source_language,
+                cli.dictionary_target_language,
+            )?;
+            run_tui(client, dictionaries)?;
+        }
         Some(Command::Books) => {
             let books = client.list_books()?;
             println!("UUID\tCONTENT\tTITLE");

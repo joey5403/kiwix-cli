@@ -1,8 +1,8 @@
 [package]
 name = "kiwix-cli"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.97"
 description = "Browse a self-hosted Kiwix server from the command line"
 license = "MIT"
 
@@ -23,6 +23,7 @@ tempfile = "3.27.0"
 unicode-width = "0.2.2"
 url = "2.5.8"
 uuid = { version = "1.25.0", features = ["std"] }
+mdictlib = { version = "0.2.8", features = ["lzo"] }
 
 [dev-dependencies]
 assert_cmd = "2.2.2"
