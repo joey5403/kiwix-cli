@@ -47,6 +47,10 @@ if [[ -z "$VERSION" ]]; then
     echo "Could not read package version from Cargo.toml" >&2
     exit 2
 fi
+if [[ -n "${GITHUB_REF_NAME:-}" && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+    echo "Git tag $GITHUB_REF_NAME does not match package version $VERSION" >&2
+    exit 2
+fi
 
 case "$TARGET" in
     x86_64-unknown-linux-gnu) ARCH=x86_64 ;;
@@ -57,7 +61,6 @@ case "$TARGET" in
 esac
 PACKAGE="kiwix-cli-${VERSION}-${PLATFORM}-${ARCH}"
 DIST_DIR="$ROOT_DIR/dist"
-STAGE_DIR="$DIST_DIR/$PACKAGE"
 BINARY="$ROOT_DIR/target/$TARGET/$PROFILE/kiwix-cli"
 ARCHIVE="$DIST_DIR/$PACKAGE.tar.gz"
 CHECKSUM="$ARCHIVE.sha256"
@@ -73,7 +76,10 @@ checksum_archive() {
     fi
 }
 
-rm -rf "$STAGE_DIR"
+mkdir -p "$DIST_DIR"
+STAGE_ROOT=$(mktemp -d "$DIST_DIR/.${PACKAGE}.XXXXXX")
+STAGE_DIR="$STAGE_ROOT/$PACKAGE"
+trap 'rm -rf "$STAGE_ROOT"' EXIT
 mkdir -p "$STAGE_DIR"
 
 cd "$ROOT_DIR"
@@ -96,8 +102,7 @@ if [[ "$PLATFORM" == "macos" ]]; then
     codesign --force --sign - "$STAGE_DIR/kiwix-cli"
 fi
 
-tar -C "$DIST_DIR" -czf "$ARCHIVE" "$PACKAGE"
+tar -C "$STAGE_ROOT" -czf "$ARCHIVE" "$PACKAGE"
 checksum_archive
-rm -rf "$STAGE_DIR"
 
 printf 'Built %s release:\n  %s\n  %s\n' "$PLATFORM" "$ARCHIVE" "$CHECKSUM"
