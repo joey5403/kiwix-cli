@@ -3,7 +3,8 @@ use std::fs;
 use std::io::{self, IsTerminal, stdout};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -32,8 +33,71 @@ const EVENT_TICK: Duration = Duration::from_millis(100);
 const SEARCH_PAGE_LENGTH: usize = 20;
 const MAX_QUERY_CHARS: usize = 512;
 const MAX_ARTICLE_HISTORY: usize = 64;
+const BACKGROUND_WORKERS: usize = 4;
+const BACKGROUND_QUEUE: usize = 8;
 const HINT_KEYS: &[u8] = b"ASDFGHJKL";
 static NEXT_ASSET_ID: AtomicU64 = AtomicU64::new(1);
+
+type BackgroundTask = Box<dyn FnOnce() + Send + 'static>;
+
+struct WorkerPool {
+    tx: SyncSender<(u64, BackgroundTask)>,
+    active_generation: Arc<AtomicU64>,
+}
+
+impl WorkerPool {
+    fn new() -> Result<Self> {
+        let (tx, rx) = mpsc::sync_channel::<(u64, BackgroundTask)>(BACKGROUND_QUEUE);
+        let rx = Arc::new(Mutex::new(rx));
+        let active_generation = Arc::new(AtomicU64::new(0));
+        for index in 0..BACKGROUND_WORKERS {
+            let rx = Arc::clone(&rx);
+            let active_generation = Arc::clone(&active_generation);
+            thread::Builder::new()
+                .name(format!("kiwix-worker-{index}"))
+                .spawn(move || {
+                    loop {
+                        let message = match rx.lock() {
+                            Ok(receiver) => receiver.recv(),
+                            Err(poisoned) => poisoned.into_inner().recv(),
+                        };
+                        let Ok((generation, task)) = message else {
+                            break;
+                        };
+                        if generation == active_generation.load(Ordering::Acquire) {
+                            task();
+                        }
+                    }
+                })
+                .context("failed to start background worker")?;
+        }
+        Ok(Self {
+            tx,
+            active_generation,
+        })
+    }
+
+    fn set_generation(&self, generation: u64) {
+        self.active_generation.store(generation, Ordering::Release);
+    }
+
+    fn submit(&self, generation: u64, task: BackgroundTask) -> Result<(), String> {
+        self.tx
+            .try_send((generation, task))
+            .map_err(|error| match error {
+                TrySendError::Full(_) => {
+                    "Background request queue is full; wait and retry".to_owned()
+                }
+                TrySendError::Disconnected(_) => "Background workers have stopped".to_owned(),
+            })
+    }
+}
+
+impl Drop for WorkerPool {
+    fn drop(&mut self) {
+        self.active_generation.fetch_add(1, Ordering::AcqRel);
+    }
+}
 
 const ACCENT: Color = Color::Cyan;
 const EMPHASIS: Color = Color::Yellow;
@@ -75,13 +139,6 @@ impl LibraryLanding {
         match self {
             Self::Home => Loading::Home,
             Self::Random => Loading::Random,
-        }
-    }
-
-    const fn worker_name(self) -> &'static str {
-        match self {
-            Self::Home => "kiwix-home",
-            Self::Random => "kiwix-random",
         }
     }
 }
@@ -140,14 +197,24 @@ pub fn run_tui(client: KiwixClient) -> Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         bail!("interactive mode requires a terminal; use books, search, or read in scripts");
     }
-    let reading = ReadingStore::load_default().context("failed to load reading data")?;
+    let client = client
+        .with_timeout_cap(Duration::from_secs(30))
+        .context("failed to configure interactive request timeout")?;
+    let mut reading = ReadingStore::load_default().context("failed to load reading data")?;
+    reading
+        .enable_async_persistence()
+        .context("failed to start reading data writer")?;
     let mut app = App::new(client, reading)?;
     app.load_libraries();
-    ratatui::run(|terminal| {
+    let run_result = ratatui::run(|terminal| {
         execute!(stdout(), EnableMouseCapture).context("failed to enable mouse capture")?;
         let _mouse_guard = MouseCaptureGuard;
         app.run(terminal)
-    })
+    });
+    let persistence_result = app.reading.finish_persistence();
+    run_result?;
+    persistence_result?;
+    Ok(())
 }
 
 struct MouseCaptureGuard;
@@ -189,6 +256,7 @@ struct App {
     client: KiwixClient,
     tx: Sender<WorkerMessage>,
     rx: Receiver<WorkerMessage>,
+    workers: WorkerPool,
     generation: u64,
     should_quit: bool,
     view: View,
@@ -227,10 +295,12 @@ struct App {
 impl App {
     fn new(client: KiwixClient, reading: ReadingStore) -> Result<Self> {
         let (tx, rx) = mpsc::channel();
+        let workers = WorkerPool::new()?;
         Ok(Self {
             client,
             tx,
             rx,
+            workers,
             generation: 0,
             should_quit: false,
             view: View::Libraries,
@@ -448,6 +518,7 @@ impl App {
     fn open_saved_view(&mut self, view: View) {
         debug_assert!(matches!(view, View::History | View::Favorites));
         self.generation = self.generation.wrapping_add(1);
+        self.workers.set_generation(self.generation);
         self.loading = None;
         self.error = None;
         self.hint_state = None;
@@ -803,17 +874,18 @@ impl App {
         let label = label.to_owned();
         let directory = self.asset_directory.path().to_path_buf();
         self.notice = Some(format!("Opening {label}..."));
-        let spawn = thread::Builder::new()
-            .name("kiwix-image".to_owned())
-            .spawn(move || {
+        let submit = self.workers.submit(
+            generation,
+            Box::new(move || {
                 let result =
                     open_image_resource(&client, &locator, &source, &directory, generation)
                         .map(|()| format!("Opened {label}"))
                         .map_err(format_error);
                 let _ = tx.send(WorkerMessage::Opened { generation, result });
-            });
-        if let Err(error) = spawn {
-            self.fail_to_spawn(&error);
+            }),
+        );
+        if let Err(error) = submit {
+            self.fail_to_submit(error);
         }
     }
 
@@ -821,17 +893,18 @@ impl App {
         let generation = self.generation;
         let tx = self.tx.clone();
         self.notice = Some(format!("Opening {label}..."));
-        let spawn = thread::Builder::new()
-            .name("kiwix-opener".to_owned())
-            .spawn(move || {
+        let submit = self.workers.submit(
+            generation,
+            Box::new(move || {
                 let result = open::that_detached(&target)
                     .with_context(|| format!("failed to open {target}"))
                     .map(|()| format!("Opened {label}"))
                     .map_err(format_error);
                 let _ = tx.send(WorkerMessage::Opened { generation, result });
-            });
-        if let Err(error) = spawn {
-            self.fail_to_spawn(&error);
+            }),
+        );
+        if let Err(error) = submit {
+            self.fail_to_submit(error);
         }
     }
 
@@ -868,14 +941,15 @@ impl App {
         let generation = self.begin_load(Loading::Libraries);
         let client = self.client.clone();
         let tx = self.tx.clone();
-        let spawn = thread::Builder::new()
-            .name("kiwix-libraries".to_owned())
-            .spawn(move || {
+        let submit = self.workers.submit(
+            generation,
+            Box::new(move || {
                 let result = client.list_books().map_err(format_error);
                 let _ = tx.send(WorkerMessage::Libraries { generation, result });
-            });
-        if let Err(error) = spawn {
-            self.fail_to_spawn(&error);
+            }),
+        );
+        if let Err(error) = submit {
+            self.fail_to_submit(error);
         }
     }
 
@@ -894,9 +968,9 @@ impl App {
         let generation = self.begin_load(Loading::Search);
         let client = self.client.clone();
         let tx = self.tx.clone();
-        let spawn = thread::Builder::new()
-            .name("kiwix-search".to_owned())
-            .spawn(move || {
+        let submit = self.workers.submit(
+            generation,
+            Box::new(move || {
                 let result = client
                     .search(&book.id, &query, start, SEARCH_PAGE_LENGTH)
                     .map_err(format_error);
@@ -905,9 +979,10 @@ impl App {
                     query,
                     result,
                 });
-            });
-        if let Err(error) = spawn {
-            self.fail_to_spawn(&error);
+            }),
+        );
+        if let Err(error) = submit {
+            self.fail_to_submit(error);
         }
     }
 
@@ -957,9 +1032,9 @@ impl App {
         let title = result.title;
         let locator = result.locator;
         let worker_locator = locator.clone();
-        let spawn = thread::Builder::new()
-            .name("kiwix-article".to_owned())
-            .spawn(move || {
+        let submit = self.workers.submit(
+            generation,
+            Box::new(move || {
                 let result = client.read_article(&worker_locator).map_err(format_error);
                 let _ = tx.send(WorkerMessage::Article {
                     generation,
@@ -968,9 +1043,10 @@ impl App {
                     fragment,
                     result,
                 });
-            });
-        if let Err(error) = spawn {
-            self.fail_to_spawn(&error);
+            }),
+        );
+        if let Err(error) = submit {
+            self.fail_to_submit(error);
         }
     }
 
@@ -1012,9 +1088,9 @@ impl App {
         let client = self.client.clone();
         let tx = self.tx.clone();
         let fallback_title = self.article_title.clone();
-        let spawn = thread::Builder::new()
-            .name(landing.worker_name().to_owned())
-            .spawn(move || {
+        let submit = self.workers.submit(
+            generation,
+            Box::new(move || {
                 let outcome = match landing {
                     LibraryLanding::Home => client.home_locator(&book.content_id),
                     LibraryLanding::Random => client.random_locator(&book.content_id),
@@ -1038,9 +1114,10 @@ impl App {
                     fragment: None,
                     result,
                 });
-            });
-        if let Err(error) = spawn {
-            self.fail_to_spawn(&error);
+            }),
+        );
+        if let Err(error) = submit {
+            self.fail_to_submit(error);
         }
     }
 
@@ -1097,6 +1174,7 @@ impl App {
 
     fn begin_load(&mut self, loading: Loading) -> u64 {
         self.generation = self.generation.wrapping_add(1);
+        self.workers.set_generation(self.generation);
         self.loading = Some(loading);
         self.notice = None;
         self.error = None;
@@ -1104,13 +1182,18 @@ impl App {
         self.generation
     }
 
-    fn fail_to_spawn(&mut self, error: &std::io::Error) {
+    fn fail_to_submit(&mut self, error: String) {
         self.loading = None;
-        self.error = Some(format!("Could not start background request: {error}"));
+        self.error = Some(error);
     }
 
     fn receive_worker_messages(&mut self) -> bool {
         let mut received = false;
+        let persistence_errors = self.reading.take_persistence_errors().collect::<Vec<_>>();
+        if !persistence_errors.is_empty() {
+            self.error = Some(persistence_errors.join("; "));
+            received = true;
+        }
         while let Ok(message) = self.rx.try_recv() {
             received = true;
             match message {
@@ -1178,6 +1261,7 @@ impl App {
 
     fn go_back(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        self.workers.set_generation(self.generation);
         self.loading = None;
         self.error = None;
         self.notice = None;
@@ -1825,7 +1909,8 @@ fn title_from_locator(locator: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::sync::Barrier;
+    use std::time::{Duration, Instant};
 
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -1844,6 +1929,57 @@ mod tests {
             ReadingStore::in_memory(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn worker_pool_bounds_queue_and_skips_stale_jobs() {
+        let pool = WorkerPool::new().unwrap();
+        pool.set_generation(1);
+        let barrier = Arc::new(Barrier::new(BACKGROUND_WORKERS + 1));
+        let (started_tx, started_rx) = mpsc::channel();
+        let (stale_tx, stale_rx) = mpsc::channel();
+        let (fresh_tx, fresh_rx) = mpsc::channel();
+
+        for _ in 0..BACKGROUND_WORKERS {
+            let barrier = Arc::clone(&barrier);
+            let started_tx = started_tx.clone();
+            pool.submit(
+                1,
+                Box::new(move || {
+                    started_tx.send(()).unwrap();
+                    barrier.wait();
+                }),
+            )
+            .unwrap();
+        }
+        for _ in 0..BACKGROUND_WORKERS {
+            started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+
+        let stale_tx = stale_tx.clone();
+        pool.submit(1, Box::new(move || stale_tx.send(()).unwrap()))
+            .unwrap();
+        for _ in 1..BACKGROUND_QUEUE {
+            pool.submit(1, Box::new(|| {})).unwrap();
+        }
+        assert!(pool.submit(1, Box::new(|| {})).is_err());
+
+        pool.set_generation(2);
+        barrier.wait();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let fresh_tx = fresh_tx.clone();
+            match pool.submit(2, Box::new(move || fresh_tx.send(()).unwrap())) {
+                Ok(()) => break,
+                Err(error) if error.contains("queue is full") => {
+                    assert!(Instant::now() < deadline, "worker queue did not drain");
+                    thread::yield_now();
+                }
+                Err(error) => panic!("unexpected worker pool error: {error}"),
+            }
+        }
+        fresh_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(stale_rx.try_recv().is_err());
     }
 
     #[test]

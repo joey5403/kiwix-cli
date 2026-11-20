@@ -231,7 +231,7 @@ kiwix-cli read /content/rust_docs/A/Ownership --width 60
 ```text
 --server <URL>       Kiwix 服务地址，或 KIWIX_URL；默认使用公共 Browse 服务
 --username <NAME>    Basic Auth 用户名，或 KIWIX_USERNAME
---timeout <SECONDS>  请求超时，默认 30 秒，范围 1-300
+--timeout <SECONDS>  请求超时，默认 30 秒，范围 1-300；交互模式最高 30 秒
 ```
 
 使用 `kiwix-cli --help` 或 `kiwix-cli <command> --help` 查看完整命令接口。

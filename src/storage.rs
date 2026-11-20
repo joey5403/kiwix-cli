@@ -3,6 +3,9 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
 
 use anyhow::{Context, Result, bail};
 use directories::ProjectDirs;
@@ -67,10 +70,22 @@ impl Default for ReadingData {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct ReadingStore {
     path: Option<PathBuf>,
     data: ReadingData,
+    persistence: Option<PersistenceWorker>,
+}
+
+struct PersistenceWorker {
+    pending: Arc<(Mutex<PendingSnapshot>, Condvar)>,
+    errors: Receiver<String>,
+    thread: thread::JoinHandle<()>,
+}
+
+#[derive(Default)]
+struct PendingSnapshot {
+    data: Option<ReadingData>,
+    shutdown: bool,
 }
 
 impl ReadingStore {
@@ -106,6 +121,7 @@ impl ReadingStore {
         Ok(Self {
             path: Some(path),
             data,
+            persistence: None,
         })
     }
 
@@ -114,7 +130,82 @@ impl ReadingStore {
         Self {
             path: None,
             data: ReadingData::default(),
+            persistence: None,
         }
+    }
+
+    pub(crate) fn enable_async_persistence(&mut self) -> Result<()> {
+        if self.persistence.is_some() {
+            return Ok(());
+        }
+        let Some(path) = self.path.clone() else {
+            return Ok(());
+        };
+        let pending = Arc::new((Mutex::new(PendingSnapshot::default()), Condvar::new()));
+        let worker_pending = Arc::clone(&pending);
+        let (error_tx, errors) = mpsc::channel::<String>();
+        let writer = thread::Builder::new()
+            .name("kiwix-storage".to_owned())
+            .spawn(move || {
+                loop {
+                    let data = {
+                        let (state, wake) = &*worker_pending;
+                        let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
+                        while state.data.is_none() && !state.shutdown {
+                            state = wake.wait(state).unwrap_or_else(|error| error.into_inner());
+                        }
+                        match state.data.take() {
+                            Some(data) => Some(data),
+                            None if state.shutdown => None,
+                            None => continue,
+                        }
+                    };
+                    let Some(data) = data else {
+                        break;
+                    };
+                    let store = ReadingStore {
+                        path: Some(path.clone()),
+                        data,
+                        persistence: None,
+                    };
+                    if let Err(error) = store.save() {
+                        let _ = error_tx.send(format_error(error));
+                    }
+                }
+            })
+            .context("failed to start reading data writer")?;
+        self.persistence = Some(PersistenceWorker {
+            pending,
+            errors,
+            thread: writer,
+        });
+        Ok(())
+    }
+
+    pub(crate) fn take_persistence_errors(&self) -> impl Iterator<Item = String> + '_ {
+        self.persistence
+            .iter()
+            .flat_map(|worker| worker.errors.try_iter())
+    }
+
+    pub(crate) fn finish_persistence(&mut self) -> Result<()> {
+        let Some(worker) = self.persistence.take() else {
+            return Ok(());
+        };
+        let (state, wake) = &*worker.pending;
+        let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
+        state.shutdown = true;
+        wake.notify_one();
+        drop(state);
+        worker
+            .thread
+            .join()
+            .map_err(|_| anyhow::anyhow!("reading data writer panicked"))?;
+        let errors = worker.errors.try_iter().collect::<Vec<_>>();
+        if !errors.is_empty() {
+            bail!("failed to persist reading data: {}", errors.join("; "));
+        }
+        Ok(())
     }
 
     pub(crate) fn history(&self, server: &str) -> impl Iterator<Item = &SavedArticle> {
@@ -180,7 +271,20 @@ impl ReadingStore {
     fn update<T>(&mut self, change: impl FnOnce(&mut ReadingData) -> T) -> Result<T> {
         let previous = self.data.clone();
         let outcome = change(&mut self.data);
-        if let Err(error) = self.save() {
+        let result = if let Some(worker) = &self.persistence {
+            if worker.thread.is_finished() {
+                Err(anyhow::anyhow!("reading data writer stopped"))
+            } else {
+                let (state, wake) = &*worker.pending;
+                let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
+                state.data = Some(self.data.clone());
+                wake.notify_one();
+                Ok(())
+            }
+        } else {
+            self.save()
+        };
+        if let Err(error) = result {
             self.data = previous;
             return Err(error);
         }
@@ -214,6 +318,16 @@ impl ReadingStore {
             .with_context(|| format!("failed to replace {}", path.display()))?;
         Ok(())
     }
+}
+
+impl Drop for ReadingStore {
+    fn drop(&mut self) {
+        let _ = self.finish_persistence();
+    }
+}
+
+fn format_error(error: anyhow::Error) -> String {
+    format!("{error:#}")
 }
 
 fn trim_history(history: &mut Vec<SavedArticle>) {
@@ -285,6 +399,25 @@ mod tests {
 
         assert!(store.is_favorite("https://example.test/", &saved.locator));
         assert_eq!(store.favorites("https://other.test/").count(), 0);
+    }
+
+    #[test]
+    fn async_persistence_flushes_the_latest_snapshot_on_drop() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reading.json");
+        {
+            let mut store = ReadingStore::load(path.clone()).unwrap();
+            store.enable_async_persistence().unwrap();
+            store.record_visit(article("/content/wiki/First")).unwrap();
+            store.record_visit(article("/content/wiki/Latest")).unwrap();
+        }
+
+        let reloaded = ReadingStore::load(path).unwrap();
+        let history = reloaded
+            .history("https://example.test/")
+            .collect::<Vec<_>>();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].locator, "/content/wiki/Latest");
     }
 
     #[test]

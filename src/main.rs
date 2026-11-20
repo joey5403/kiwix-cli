@@ -20,7 +20,7 @@ struct Cli {
     #[arg(long, env = "KIWIX_USERNAME", global = true)]
     username: Option<String>,
 
-    /// Request timeout in seconds
+    /// Request timeout in seconds; interactive mode caps it at 30 seconds
     #[arg(long, default_value_t = 30, global = true, value_parser = clap::value_parser!(u64).range(1..=300))]
     timeout: u64,
 

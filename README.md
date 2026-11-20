@@ -231,7 +231,7 @@ Global options may appear before or after the subcommand:
 ```text
 --server <URL>       Kiwix server URL, or KIWIX_URL; default public Browse service
 --username <NAME>    Basic Auth username, or KIWIX_USERNAME
---timeout <SECONDS>  Request timeout, default 30, range 1-300
+--timeout <SECONDS>  Request timeout, default 30, range 1-300; interactive mode caps it at 30 seconds
 ```
 
 Run `kiwix-cli --help` or `kiwix-cli <command> --help` for the complete interface.

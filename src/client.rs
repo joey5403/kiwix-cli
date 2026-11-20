@@ -37,6 +37,7 @@ pub struct KiwixClient {
     http: Client,
     username: Option<String>,
     password: Option<String>,
+    timeout: Duration,
 }
 
 impl KiwixClient {
@@ -79,7 +80,17 @@ impl KiwixClient {
             http,
             username,
             password,
+            timeout,
         })
+    }
+
+    pub(crate) fn with_timeout_cap(&self, maximum: Duration) -> Result<Self> {
+        Self::new(
+            self.base.as_str(),
+            self.username.clone(),
+            self.password.clone(),
+            self.timeout.min(maximum),
+        )
     }
 
     /// Loads and parses the complete OPDS library catalog.
@@ -476,6 +487,28 @@ mod tests {
         assert_eq!(
             url.as_str(),
             "https://example.test/kiwix/raw/wiki/content/A/Rust"
+        );
+    }
+
+    #[test]
+    fn interactive_timeout_cap_only_shortens_long_timeouts() {
+        let client = KiwixClient::new(
+            "https://example.test/",
+            None,
+            None,
+            Duration::from_secs(120),
+        )
+        .unwrap()
+        .with_timeout_cap(Duration::from_secs(30))
+        .unwrap();
+
+        assert_eq!(client.timeout, Duration::from_secs(30));
+        assert_eq!(
+            client
+                .with_timeout_cap(Duration::from_secs(60))
+                .unwrap()
+                .timeout,
+            Duration::from_secs(30)
         );
     }
 
